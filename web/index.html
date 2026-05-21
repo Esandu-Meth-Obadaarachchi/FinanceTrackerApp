@@ -18,21 +18,46 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="FinTrack — personal financial tracker with cloud sync.">
+  <meta name="theme-color" content="#0B0D14">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="financialtracker">
+  <meta name="apple-mobile-web-app-title" content="FinTrack">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>financialtracker</title>
+  <title>FinTrack — Financial Tracker</title>
   <link rel="manifest" href="manifest.json">
+  <style>
+    body { background-color: #06080F; }
+    .loading {
+      position: fixed; inset: 0; display: flex;
+      align-items: center; justify-content: center;
+      background: #06080F;
+    }
+    .loading .dot {
+      width: 14px; height: 14px; border-radius: 50%;
+      background: #3DEBA8; box-shadow: 0 0 24px #3DEBA8;
+      animation: pulse 1s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(0.7); opacity: 0.5; }
+      50% { transform: scale(1); opacity: 1; }
+    }
+  </style>
 </head>
 <body>
+  <div class="loading" id="loading"><div class="dot"></div></div>
+  <script>
+    window.addEventListener('flutter-first-frame', function () {
+      var el = document.getElementById('loading');
+      if (el) el.remove();
+    });
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

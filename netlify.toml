@@ -1,0 +1,21 @@
+# Netlify configuration for the FinTrack Flutter web build.
+#
+# Two ways to deploy:
+#   1. Pre-built (simplest): run `flutter build web --release` locally, then
+#      `netlify deploy --prod --dir=build/web`. The redirect rule below still
+#      applies because netlify.toml is read from the repo root.
+#   2. Git-connected continuous deploy: connect this repo in the Netlify UI.
+#      The command below installs Flutter in CI and builds the web bundle.
+
+[build]
+  command = "bash netlify-build.sh"
+  publish = "build/web"
+
+[build.environment]
+  FLUTTER_VERSION = "3.32.4"
+
+# Single-page-app fallback so deep links resolve to the Flutter entrypoint.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

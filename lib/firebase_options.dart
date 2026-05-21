@@ -24,17 +24,20 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'PLACEHOLDER',
-    appId: 'PLACEHOLDER',
-    messagingSenderId: 'PLACEHOLDER',
-    projectId: 'placeholder',
+    apiKey: 'AIzaSyAxLmoHppGJw_5qow71j55EQyFELepo0N8',
+    appId: '1:984237745523:web:28156c4a0589270a355106',
+    messagingSenderId: '984237745523',
+    projectId: 'fintrack-05220041',
+    authDomain: 'fintrack-05220041.firebaseapp.com',
+    storageBucket: 'fintrack-05220041.firebasestorage.app',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'PLACEHOLDER',
-    appId: 'PLACEHOLDER',
-    messagingSenderId: 'PLACEHOLDER',
-    projectId: 'placeholder',
+    apiKey: 'AIzaSyAyWPNOkIixiV2-xoz3BJVp5V0PhIuyUv8',
+    appId: '1:984237745523:android:26ddcda375f007aa355106',
+    messagingSenderId: '984237745523',
+    projectId: 'fintrack-05220041',
+    storageBucket: 'fintrack-05220041.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(

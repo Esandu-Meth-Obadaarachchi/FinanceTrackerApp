@@ -1,30 +1,24 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+// Basic smoke tests for FinTrack helper logic.
 
-import 'package:flutter/material.dart';
+import 'package:financialtracker/utils/formatters.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:financialtracker/main.dart';
-
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  test('fmt produces compact figures', () {
+    expect(fmt(500), '500');
+    expect(fmt(6800), '6.8k');
+    expect(fmt(45200), '45k');
+    expect(fmt(1500000), '1.5M');
+  });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+  test('fmtFull keeps two decimals with grouping', () {
+    expect(fmtFull(270500), '270,500.00');
+    expect(fmtFull(1234.5), '1,234.50');
+  });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  test('recentMonths returns the requested count ending this month', () {
+    final months = recentMonths(12);
+    expect(months.length, 12);
+    expect(months.last, monthKeyOf(DateTime.now()));
   });
 }

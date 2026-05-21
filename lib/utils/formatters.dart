@@ -79,7 +79,7 @@ String dateKeyOf(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
 /// Rolling list of the last [count] month keys, oldest first, ending this month.
-List<String> recentMonths({int count = 12}) {
+List<String> recentMonths([int count = 12]) {
   final now = DateTime.now();
   final list = <String>[];
   for (int i = count - 1; i >= 0; i--) {
