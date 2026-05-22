@@ -21,11 +21,26 @@ const _typeColors = {
   'transfer': Color(0xFF60A5FA),
 };
 
+/// Opens [sheet] as a bottom sheet, re-providing [AppState].
+///
+/// Bottom sheets are inserted under the root navigator — above the
+/// `ChangeNotifierProvider<AppState>` from AuthGate — so without this they
+/// cannot find AppState. `.value` re-exposes the existing instance without
+/// taking ownership of its lifecycle.
+void _showWithState(BuildContext context, Widget sheet) {
+  final app = context.read<AppState>();
+  showAppSheet(
+    context,
+    builder: (_) =>
+        ChangeNotifierProvider<AppState>.value(value: app, child: sheet),
+  );
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // Type picker
 // ════════════════════════════════════════════════════════════════════════
 void showTypePicker(BuildContext context) {
-  showAppSheet(context, builder: (_) => const _TypePickerSheet());
+  _showWithState(context, const _TypePickerSheet());
 }
 
 class _TypePickerSheet extends StatelessWidget {
@@ -108,9 +123,8 @@ void showAddTransactionSheet(
   AppTransaction? edit,
   String? initialType,
 }) {
-  showAppSheet(context,
-      builder: (_) =>
-          _AddTransactionSheet(edit: edit, initialType: initialType));
+  _showWithState(
+      context, _AddTransactionSheet(edit: edit, initialType: initialType));
 }
 
 class _AddTransactionSheet extends StatefulWidget {
@@ -634,7 +648,7 @@ class _AddTransactionSheetState extends State<_AddTransactionSheet> {
 // Add account
 // ════════════════════════════════════════════════════════════════════════
 void showAddAccountSheet(BuildContext context) {
-  showAppSheet(context, builder: (_) => const _AddAccountSheet());
+  _showWithState(context, const _AddAccountSheet());
 }
 
 class _AddAccountSheet extends StatefulWidget {
@@ -785,7 +799,7 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
 // Add loan
 // ════════════════════════════════════════════════════════════════════════
 void showAddLoanSheet(BuildContext context) {
-  showAppSheet(context, builder: (_) => const _AddLoanSheet());
+  _showWithState(context, const _AddLoanSheet());
 }
 
 class _AddLoanSheet extends StatefulWidget {
@@ -1021,7 +1035,7 @@ class _AddLoanSheetState extends State<_AddLoanSheet> {
 // Transaction detail
 // ════════════════════════════════════════════════════════════════════════
 void showTransactionDetail(BuildContext context, AppTransaction tx) {
-  showAppSheet(context, builder: (_) => _TransactionDetailSheet(tx: tx));
+  _showWithState(context, _TransactionDetailSheet(tx: tx));
 }
 
 class _TransactionDetailSheet extends StatelessWidget {

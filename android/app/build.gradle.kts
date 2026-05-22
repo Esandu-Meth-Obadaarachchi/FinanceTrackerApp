@@ -11,7 +11,8 @@ plugins {
 android {
     namespace = "com.example.financialtracker"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // Firebase plugins require NDK 27; pin to the highest version they need.
+    ndkVersion = "27.0.12077973"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11

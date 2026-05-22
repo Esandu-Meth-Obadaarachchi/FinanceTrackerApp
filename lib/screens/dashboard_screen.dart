@@ -158,7 +158,7 @@ class DashboardScreen extends StatelessWidget {
                 letterSpacing: 0.6)),
         const SizedBox(height: 10),
         SizedBox(
-          height: 96,
+          height: 116,
           child: app.accounts.isEmpty
               ? Align(
                   alignment: Alignment.centerLeft,

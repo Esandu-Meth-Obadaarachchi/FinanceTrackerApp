@@ -5,6 +5,19 @@ A personal finance tracker built with **Flutter** (web + Android) and
 `Financial Tracker _Standalone_.html` design — dark/light themes, LKR currency,
 Sri Lanka tax-aligned categories, and live cloud sync across devices.
 
+## Live deployment
+
+| | |
+|---|---|
+| **Web app** | https://fintrack-esandu-010357.netlify.app |
+| **Firebase project** | `fintrack-05220041` |
+| **Firebase console** | https://console.firebase.google.com/project/fintrack-05220041 |
+| **Netlify admin** | https://app.netlify.com/projects/fintrack-esandu-010357 |
+
+Firebase Auth (Email/Password), Cloud Firestore (`asia-south1`) and the
+security rules are already provisioned. To redeploy the web app after
+changes: `flutter build web --release && netlify deploy --prod --dir=build/web --no-build`.
+
 ## Features
 
 - **Email + password auth** (Firebase Authentication)
