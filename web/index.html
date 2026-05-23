@@ -32,6 +32,15 @@
 
   <title>FinTrack — Financial Tracker</title>
   <link rel="manifest" href="manifest.json">
+
+  <!--
+    Google Sign-In on web uses Firebase's signInWithPopup, which reads the
+    OAuth client ID from your Firebase project config — no extra meta tag
+    is required. Ensure "Google" sign-in is enabled in the Firebase console
+    (Authentication → Sign-in method) and that your domain (e.g.
+    localhost, your Netlify host) is added to the OAuth "Authorized
+    domains" list.
+  -->
   <style>
     body { background-color: #06080F; }
     .loading {

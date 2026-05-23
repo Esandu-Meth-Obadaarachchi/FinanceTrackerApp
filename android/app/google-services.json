@@ -12,7 +12,20 @@
           "package_name": "com.example.financialtracker"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "984237745523-9pjk92nnb7furjqs42e3kbdi7a1nen7g.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.financialtracker",
+            "certificate_hash": "99d467b9aba3142931e56ca611d757b38dbf4e81"
+          }
+        },
+        {
+          "client_id": "984237745523-5goffv95fjuj2httanigpcc7s2r488g2.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyAyWPNOkIixiV2-xoz3BJVp5V0PhIuyUv8"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "984237745523-5goffv95fjuj2httanigpcc7s2r488g2.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
