@@ -11,6 +11,7 @@ import '../utils/formatters.dart';
 import '../widgets/common.dart';
 import '../widgets/form_fields.dart';
 import 'modals/sheets.dart';
+import 'recurring_screen.dart';
 
 /// Lists transactions for the selected month, grouped by date.
 class TransactionsScreen extends StatefulWidget {
@@ -72,6 +73,40 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 110),
       children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text('This month',
+                  style: sans(
+                      size: 13, weight: FontWeight.w700, color: colors.sub)),
+            ),
+            GestureDetector(
+              onTap: () => openRecurringManager(context),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF3DEBA8).withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.repeat,
+                        size: 15, color: Color(0xFF3DEBA8)),
+                    const SizedBox(width: 6),
+                    Text('Recurring',
+                        style: sans(
+                            size: 12.5,
+                            weight: FontWeight.w600,
+                            color: const Color(0xFF3DEBA8))),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
         SegmentedControl<String>(
           colors: colors,
           value: _tab,
@@ -199,13 +234,24 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(tx.note.isNotEmpty ? tx.note : tx.category,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: sans(
-                          size: 14,
-                          weight: FontWeight.w600,
-                          color: colors.text)),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(tx.note.isNotEmpty ? tx.note : tx.category,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: sans(
+                                size: 14,
+                                weight: FontWeight.w600,
+                                color: colors.text)),
+                      ),
+                      if (tx.isRecurring) ...[
+                        const SizedBox(width: 5),
+                        Icon(Icons.repeat,
+                            size: 13, color: colors.sub),
+                      ],
+                    ],
+                  ),
                   Text('${tx.category} · ${acc?.name ?? '—'}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,

@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/account.dart';
 import '../models/app_transaction.dart';
 import '../models/loan.dart';
+import '../models/recurring_rule.dart';
 
 /// Reads and writes a single user's data under `users/{uid}/...`.
 class FirestoreService {
@@ -20,6 +21,8 @@ class FirestoreService {
       _userDoc.collection('transactions');
   CollectionReference<Map<String, dynamic>> get _loans =>
       _userDoc.collection('loans');
+  CollectionReference<Map<String, dynamic>> get _recurring =>
+      _userDoc.collection('recurring');
 
   // ── Streams ────────────────────────────────────────────────────────────
   Stream<List<Account>> accountsStream() => _accounts
@@ -37,6 +40,12 @@ class FirestoreService {
       .orderBy('createdAt', descending: true)
       .snapshots()
       .map((s) => s.docs.map((d) => Loan.fromMap(d.id, d.data())).toList());
+
+  Stream<List<RecurringRule>> recurringStream() => _recurring
+      .orderBy('createdAt', descending: true)
+      .snapshots()
+      .map((s) =>
+          s.docs.map((d) => RecurringRule.fromMap(d.id, d.data())).toList());
 
   // ── Accounts ───────────────────────────────────────────────────────────
   Future<void> addAccount(Account a) =>
@@ -63,4 +72,14 @@ class FirestoreService {
       _loans.doc(id).update(changes);
 
   Future<void> deleteLoan(String id) => _loans.doc(id).delete();
+
+  // ── Recurring rules ──────────────────────────────────────────────────────
+  Future<DocumentReference<Map<String, dynamic>>> addRecurring(
+          RecurringRule r) =>
+      _recurring.add({...r.toMap(), 'createdAt': FieldValue.serverTimestamp()});
+
+  Future<void> updateRecurring(String id, Map<String, dynamic> changes) =>
+      _recurring.doc(id).update(changes);
+
+  Future<void> deleteRecurring(String id) => _recurring.doc(id).delete();
 }

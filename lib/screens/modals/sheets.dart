@@ -5,6 +5,7 @@ import '../../data/categories.dart';
 import '../../models/account.dart';
 import '../../models/app_transaction.dart';
 import '../../models/loan.dart';
+import '../../models/recurring_rule.dart';
 import '../../state/app_state.dart';
 import '../../theme/app_text.dart';
 import '../../theme/palette.dart';
@@ -1032,6 +1033,431 @@ class _AddLoanSheetState extends State<_AddLoanSheet> {
 }
 
 // ════════════════════════════════════════════════════════════════════════
+// Add / edit recurring rule
+// ════════════════════════════════════════════════════════════════════════
+void showAddRecurringSheet(BuildContext context, {RecurringRule? edit}) {
+  _showWithState(context, _AddRecurringSheet(edit: edit));
+}
+
+class _AddRecurringSheet extends StatefulWidget {
+  const _AddRecurringSheet({this.edit});
+  final RecurringRule? edit;
+
+  @override
+  State<_AddRecurringSheet> createState() => _AddRecurringSheetState();
+}
+
+class _AddRecurringSheetState extends State<_AddRecurringSheet> {
+  late String _type;
+  late final TextEditingController _amount;
+  late final TextEditingController _note;
+  String _accountId = '';
+  String _category = '';
+  late int _dayOfMonth;
+  late String _startMonth;
+  String _status = 'received';
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.edit;
+    _type = e?.type ?? 'expense';
+    _amount = TextEditingController(text: e != null ? _trimAmt(e.amount) : '');
+    _note = TextEditingController(text: e?.note ?? '');
+    _category = e?.category ?? '';
+    _dayOfMonth = e?.dayOfMonth ?? 1;
+    _startMonth = e?.startMonth ?? monthKeyOf(DateTime.now());
+    _status = e?.status ?? 'received';
+    _accountId = e?.accountId ?? '';
+  }
+
+  String _trimAmt(double v) =>
+      v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();
+
+  @override
+  void dispose() {
+    _amount.dispose();
+    _note.dispose();
+    super.dispose();
+  }
+
+  String _defaultCategory(String t) =>
+      t == 'income' ? kIncomeCategories.first.label : kExpenseCategories.first.label;
+
+  Future<void> _save(AppState app) async {
+    final amt = double.tryParse(_amount.text.trim());
+    if (amt == null || amt <= 0) {
+      _toast('Enter a valid amount');
+      return;
+    }
+    if (_accountId.isEmpty) {
+      _toast('Select an account');
+      return;
+    }
+
+    setState(() => _saving = true);
+    final rule = RecurringRule(
+      id: widget.edit?.id ?? '',
+      type: _type,
+      accountId: _accountId,
+      category: _category.isNotEmpty ? _category : _defaultCategory(_type),
+      note: _note.text.trim(),
+      amount: amt,
+      dayOfMonth: _dayOfMonth,
+      status: _type == 'income' ? _status : 'received',
+      active: widget.edit?.active ?? true,
+      startMonth: _startMonth,
+      lastGeneratedMonth: widget.edit?.lastGeneratedMonth,
+    );
+    try {
+      if (widget.edit != null) {
+        await app.updateRecurring(rule);
+      } else {
+        await app.addRecurring(rule);
+      }
+      if (mounted) Navigator.of(context).pop();
+    } catch (_) {
+      if (mounted) {
+        setState(() => _saving = false);
+        _toast('Could not save — check your connection');
+      }
+    }
+  }
+
+  void _toast(String m) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.read<ThemeController>().colors;
+    final app = context.watch<AppState>();
+    final accounts = app.accounts;
+    final typeColor = _typeColors[_type]!;
+
+    if (_accountId.isEmpty && accounts.isNotEmpty) {
+      _accountId = accounts.first.id;
+    }
+    // Start month options: the rolling recent window plus a few months ahead.
+    final startOptions = <String>[
+      ...recentMonths(12),
+      for (int i = 1; i <= 3; i++)
+        monthKeyOf(DateTime(DateTime.now().year, DateTime.now().month + i, 1)),
+    ];
+    if (!startOptions.contains(_startMonth)) startOptions.insert(0, _startMonth);
+
+    return SheetScaffold(
+      title: widget.edit != null ? 'Edit Recurring' : 'Add Recurring',
+      colors: colors,
+      children: [
+        // Type selector — income / expense only.
+        Row(
+          children: [
+            for (final t in ['income', 'expense']) ...[
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(() {
+                    _type = t;
+                    _category = '';
+                  }),
+                  child: Container(
+                    margin: EdgeInsets.only(right: t == 'income' ? 8 : 0),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: _type == t
+                          ? _typeColors[t]!.withValues(alpha: 0.10)
+                          : Colors.transparent,
+                      border: Border.all(
+                        color: _type == t ? _typeColors[t]! : colors.inputBorder,
+                        width: 1.5,
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Center(
+                      child: Text(
+                        t[0].toUpperCase() + t.substring(1),
+                        style: sans(
+                          size: 13,
+                          weight: FontWeight.w600,
+                          color: _type == t ? _typeColors[t]! : colors.sub,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 16),
+
+        // Amount
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          decoration: BoxDecoration(
+            color: colors.inputBg,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            children: [
+              Text('AMOUNT (LKR) / MONTH',
+                  style: sans(
+                      size: 12,
+                      weight: FontWeight.w600,
+                      color: colors.sub,
+                      letterSpacing: 0.6)),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text('Rs ', style: mono(size: 22, color: colors.sub)),
+                  IntrinsicWidth(
+                    child: TextField(
+                      controller: _amount,
+                      autofocus: widget.edit == null,
+                      textAlign: TextAlign.center,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [amountFormatter],
+                      style: mono(
+                          size: 36, weight: FontWeight.w700, color: typeColor),
+                      cursorColor: typeColor,
+                      decoration: InputDecoration(
+                        isCollapsed: true,
+                        border: InputBorder.none,
+                        hintText: '0',
+                        hintStyle: mono(
+                            size: 36,
+                            weight: FontWeight.w700,
+                            color: colors.muted),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        if (accounts.isEmpty)
+          _infoBox(colors, 'Add an account first from the Accounts screen.')
+        else
+          AppDropdown<String>(
+            colors: colors,
+            label: 'Account',
+            value: accounts.any((a) => a.id == _accountId)
+                ? _accountId
+                : accounts.first.id,
+            items: [
+              for (final a in accounts)
+                DropdownMenuItem(value: a.id, child: Text(a.name)),
+            ],
+            onChanged: (v) => setState(() => _accountId = v ?? ''),
+          ),
+
+        const SizedBox(height: 16),
+        FieldLabel(
+          'Category',
+          colors: colors,
+          trailing: Text('— tap to select',
+              style: sans(size: 11, color: const Color(0xFFFFB547))),
+        ),
+        _categoryPicker(colors),
+
+        const SizedBox(height: 16),
+        AppTextField(
+          colors: colors,
+          controller: _note,
+          label: 'Note / Description',
+          hint: 'e.g. Monthly rent, Netflix…',
+        ),
+
+        const SizedBox(height: 14),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: AppDropdown<int>(
+                colors: colors,
+                label: 'Day of month',
+                value: _dayOfMonth,
+                items: [
+                  for (int d = 1; d <= 31; d++)
+                    DropdownMenuItem(value: d, child: Text('Day $d')),
+                ],
+                onChanged: (v) => setState(() => _dayOfMonth = v ?? 1),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: AppDropdown<String>(
+                colors: colors,
+                label: 'Starts',
+                value: _startMonth,
+                items: [
+                  for (final m in startOptions)
+                    DropdownMenuItem(value: m, child: Text(fmtMonthLong(m))),
+                ],
+                onChanged: (v) => setState(
+                    () => _startMonth = v ?? monthKeyOf(DateTime.now())),
+              ),
+            ),
+          ],
+        ),
+
+        if (_type == 'income') ...[
+          const SizedBox(height: 14),
+          FieldLabel('Status when added', colors: colors),
+          Row(
+            children: [
+              for (final s in ['received', 'pending']) ...[
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => setState(() => _status = s),
+                    child: Container(
+                      margin: EdgeInsets.only(right: s == 'received' ? 8 : 0),
+                      padding: const EdgeInsets.symmetric(vertical: 9),
+                      decoration: BoxDecoration(
+                        color: _status == s
+                            ? (s == 'received'
+                                    ? const Color(0xFF3DEBA8)
+                                    : const Color(0xFFFFB547))
+                                .withValues(alpha: 0.10)
+                            : Colors.transparent,
+                        border: Border.all(
+                          color: _status == s
+                              ? (s == 'received'
+                                  ? const Color(0xFF3DEBA8)
+                                  : const Color(0xFFFFB547))
+                              : colors.inputBorder,
+                          width: 1.5,
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Center(
+                        child: Text(
+                          s[0].toUpperCase() + s.substring(1),
+                          style: sans(
+                            size: 13,
+                            weight: FontWeight.w600,
+                            color: _status == s
+                                ? (s == 'received'
+                                    ? const Color(0xFF3DEBA8)
+                                    : const Color(0xFFFFB547))
+                                : colors.sub,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+
+        const SizedBox(height: 22),
+        PrimaryButton(
+          label: widget.edit != null ? 'Update Automation' : 'Save Automation',
+          color: typeColor,
+          busy: _saving,
+          onPressed: accounts.isEmpty ? null : () => _save(app),
+        ),
+      ],
+    );
+  }
+
+  Widget _infoBox(Palette colors, String text) => Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFB547).withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.info_outline, size: 16, color: Color(0xFFFFB547)),
+            const SizedBox(width: 8),
+            Expanded(
+                child: Text(text, style: sans(size: 12.5, color: colors.text))),
+          ],
+        ),
+      );
+
+  Widget _categoryPicker(Palette colors) {
+    if (_type == 'income') {
+      return ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 220),
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              for (final c in kIncomeCategories) _catChip(c, colors, wide: true),
+            ],
+          ),
+        ),
+      );
+    }
+    final groups = <String, List<CategoryDef>>{};
+    for (final c in kExpenseCategories) {
+      groups.putIfAbsent(c.group, () => []).add(c);
+    }
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 260),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final entry in groups.entries) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(2, 8, 0, 6),
+                child: Text(entry.key.toUpperCase(),
+                    style: sans(
+                        size: 10,
+                        weight: FontWeight.w700,
+                        color: colors.sub,
+                        letterSpacing: 0.7)),
+              ),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final c in entry.value) _catChip(c, colors),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _catChip(CategoryDef c, Palette colors, {bool wide = false}) {
+    final selected = _category == c.label;
+    final col = categoryColor(c.label);
+    return GestureDetector(
+      onTap: () => setState(() => _category = c.label),
+      child: Container(
+        width: wide ? double.infinity : null,
+        margin: EdgeInsets.only(bottom: wide ? 4 : 0),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? col.withValues(alpha: 0.13) : Colors.transparent,
+          border:
+              Border.all(color: selected ? col : colors.inputBorder, width: 1.5),
+          borderRadius: BorderRadius.circular(wide ? 12 : 20),
+        ),
+        child: Text(c.label,
+            style: sans(
+                size: wide ? 13 : 12,
+                weight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: selected ? col : colors.sub)),
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════
 // Transaction detail
 // ════════════════════════════════════════════════════════════════════════
 void showTransactionDetail(BuildContext context, AppTransaction tx) {
@@ -1094,6 +1520,8 @@ class _TransactionDetailSheet extends StatelessWidget {
           row('To Account',
               txt(app.accountById(tx.toAccountId!)?.name ?? 'Unknown')),
         if (tx.isIncome) row('Status', StatusChip(status: tx.status)),
+        if (tx.isRecurring)
+          row('Source', const TagPill(text: 'RECURRING', color: Color(0xFF3DEBA8))),
         if (tx.note.isNotEmpty) row('Note', txt(tx.note)),
         const SizedBox(height: 6),
         Row(
