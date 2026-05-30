@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../app_info.dart';
 import '../services/auth_service.dart';
 import '../theme/app_text.dart';
 import '../theme/palette.dart';
@@ -278,6 +279,19 @@ class _ProfileMenu extends StatelessWidget {
               const SizedBox(width: 10),
               Text('Sign out',
                   style: sans(size: 13, color: const Color(0xFFFF5C7A))),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem<String>(
+          enabled: false,
+          height: 32,
+          child: Row(
+            children: [
+              Icon(Icons.info_outline, size: 14, color: colors.muted),
+              const SizedBox(width: 8),
+              Text('Version $kAppVersion',
+                  style: sans(size: 12, color: colors.muted)),
             ],
           ),
         ),

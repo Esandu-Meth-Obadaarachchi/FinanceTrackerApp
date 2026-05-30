@@ -2,7 +2,7 @@ name: financialtracker
 description: "FinTrack — a personal financial tracker with cloud sync."
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 3.0.0+3
 
 environment:
   sdk: ^3.8.1
