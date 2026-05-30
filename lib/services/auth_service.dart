@@ -1,8 +1,11 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:google_sign_in/google_sign_in.dart';
 
 /// Thin wrapper around FirebaseAuth with friendly error messages.
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
 
   Stream<User?> get authState => _auth.authStateChanges();
   User? get currentUser => _auth.currentUser;
@@ -41,7 +44,46 @@ class AuthService {
     }
   }
 
-  Future<void> signOut() => _auth.signOut();
+  /// Sign in with Google. Uses the web popup flow on web and the native
+  /// account picker on mobile/desktop.
+  Future<void> signInWithGoogle() async {
+    try {
+      if (kIsWeb) {
+        final provider = GoogleAuthProvider()
+          ..addScope('email')
+          ..addScope('profile');
+        await _auth.signInWithPopup(provider);
+        return;
+      }
+
+      final account = await _googleSignIn.signIn();
+      if (account == null) {
+        // User aborted the picker — surface as a friendly cancel.
+        throw AuthFailure('Google sign-in was cancelled.');
+      }
+      final googleAuth = await account.authentication;
+      final credential = GoogleAuthProvider.credential(
+        idToken: googleAuth.idToken,
+        accessToken: googleAuth.accessToken,
+      );
+      await _auth.signInWithCredential(credential);
+    } on FirebaseAuthException catch (e) {
+      throw AuthFailure(_message(e));
+    } on AuthFailure {
+      rethrow;
+    } catch (_) {
+      throw AuthFailure('Could not sign in with Google. Try again.');
+    }
+  }
+
+  Future<void> signOut() async {
+    try {
+      if (!kIsWeb) {
+        await _googleSignIn.signOut();
+      }
+    } catch (_) {/* ignore Google session cleanup errors */}
+    await _auth.signOut();
+  }
 
   String _message(FirebaseAuthException e) {
     switch (e.code) {

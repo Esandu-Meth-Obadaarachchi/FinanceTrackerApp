@@ -71,6 +71,22 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
+  Future<void> _googleSignIn() async {
+    setState(() {
+      _error = null;
+      _busy = true;
+    });
+    try {
+      await _auth.signInWithGoogle();
+    } on AuthFailure catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } catch (_) {
+      if (mounted) setState(() => _error = 'Could not sign in with Google.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _forgotPassword() async {
     final email = _email.text.trim();
     if (email.isEmpty || !email.contains('@')) {
@@ -167,6 +183,10 @@ class _AuthScreenState extends State<AuthScreen> {
                     onPressed: _submit,
                   ),
                   const SizedBox(height: 18),
+                  _orDivider(colors),
+                  const SizedBox(height: 14),
+                  _googleButton(colors),
+                  const SizedBox(height: 18),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -206,25 +226,25 @@ class _AuthScreenState extends State<AuthScreen> {
   Widget _logo() {
     return Center(
       child: Container(
-        width: 64,
-        height: 64,
+        width: 96,
+        height: 96,
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF3DEBA8), Color(0xFF60A5FA)],
-          ),
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(24),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF3DEBA8).withValues(alpha: 0.4),
-              blurRadius: 20,
-              offset: const Offset(0, 6),
+              color: const Color(0xFF3DEBA8).withValues(alpha: 0.35),
+              blurRadius: 24,
+              offset: const Offset(0, 8),
             ),
           ],
         ),
-        child: const Icon(Icons.account_balance_wallet_rounded,
-            color: Color(0xFF0B0D14), size: 32),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: Image.asset(
+            'assets/logo.png',
+            fit: BoxFit.cover,
+          ),
+        ),
       ),
     );
   }
@@ -262,6 +282,84 @@ class _AuthScreenState extends State<AuthScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _orDivider(Palette colors) {
+    return Row(
+      children: [
+        Expanded(child: Divider(color: colors.inputBorder, height: 1)),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Text(
+            'or',
+            style: sans(size: 12, color: colors.sub),
+          ),
+        ),
+        Expanded(child: Divider(color: colors.inputBorder, height: 1)),
+      ],
+    );
+  }
+
+  Widget _googleButton(Palette colors) {
+    return InkWell(
+      onTap: _busy ? null : _googleSignIn,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          color: colors.inputBg,
+          border: Border.all(color: colors.inputBorder),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _googleGlyph(),
+            const SizedBox(width: 10),
+            Text(
+              'Continue with Google',
+              style: sans(
+                size: 15,
+                weight: FontWeight.w600,
+                color: colors.text,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _googleGlyph() {
+    // Simple inline "G" mark — avoids shipping the Google logo asset.
+    return Container(
+      width: 22,
+      height: 22,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF4285F4),
+            Color(0xFF34A853),
+            Color(0xFFFBBC05),
+            Color(0xFFEA4335),
+          ],
+          stops: [0.0, 0.35, 0.7, 1.0],
+        ),
+      ),
+      child: Text(
+        'G',
+        style: sans(
+          size: 13,
+          weight: FontWeight.w800,
+          color: Colors.white,
+        ),
+      ),
     );
   }
 

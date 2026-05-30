@@ -39,6 +39,7 @@ class DashboardScreen extends StatelessWidget {
     final pending = app.transactions
         .where((t) => t.isIncome && t.isPending)
         .fold(0.0, (s, t) => s + t.amount);
+    final lent = app.totalLent;
     final recent = [...app.transactions]
       ..sort((a, b) => b.dateTime.compareTo(a.dateTime));
 
@@ -50,6 +51,10 @@ class DashboardScreen extends StatelessWidget {
         _accountsRow(context, colors, app),
         const SizedBox(height: 16),
         _budgetCard(colors, income, expenses, pending),
+        if (lent > 0 || pending > 0) ...[
+          const SizedBox(height: 16),
+          _receivablesCard(colors, lent, pending),
+        ],
         if (expenses > 0) ...[
           const SizedBox(height: 16),
           _breakdownCard(colors, monthTxs, expenses),
@@ -292,6 +297,61 @@ class DashboardScreen extends StatelessWidget {
                 ),
             ],
           ),
+        ],
+      ),
+    );
+  }
+
+  // ── Money to receive (lent out + pending income) ─────────────────────
+  Widget _receivablesCard(Palette colors, double lent, double pending) {
+    return AppCard(
+      colors: colors,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('To Receive',
+              style: sans(
+                  size: 14, weight: FontWeight.w700, color: colors.text)),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _receivableTile(colors, 'Total Lent', lent,
+                    const Color(0xFF3DEBA8)),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _receivableTile(colors, 'Pending Income', pending,
+                    const Color(0xFFFFB547)),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _receivableTile(
+      Palette colors, String label, double value, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.09),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label.toUpperCase(),
+              style: sans(
+                  size: 11,
+                  weight: FontWeight.w600,
+                  color: color,
+                  letterSpacing: 0.5)),
+          const SizedBox(height: 3),
+          Text('Rs ${fmt(value)}',
+              style: mono(size: 18, weight: FontWeight.w700, color: color)),
         ],
       ),
     );
