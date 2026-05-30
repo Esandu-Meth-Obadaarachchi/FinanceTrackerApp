@@ -52,7 +52,8 @@ class AppState extends ChangeNotifier {
 
   // ── Derived data ───────────────────────────────────────────────────────
 
-  /// Current balance = opening balance + effect of every transaction.
+  /// Current balance = opening balance + effect of every transaction,
+  /// minus any money currently lent out from this account.
   double balanceOf(Account a) {
     double b = a.openingBalance;
     for (final t in transactions) {
@@ -65,11 +66,22 @@ class AppState extends ChangeNotifier {
         if (t.toAccountId == a.id) b += t.amount;
       }
     }
+    // Money lent out (and not yet repaid) has left the account.
+    for (final l in loans) {
+      if (l.isLent && l.isPending && l.accountId == a.id) {
+        b -= l.amount;
+      }
+    }
     return b;
   }
 
   double get totalBalance =>
       accounts.fold(0.0, (sum, a) => sum + balanceOf(a));
+
+  /// Outstanding money lent to others (pending repayment) — to be collected.
+  double get totalLent => loans
+      .where((l) => l.isLent && l.isPending)
+      .fold(0.0, (sum, l) => sum + l.amount);
 
   Account? accountById(String id) {
     for (final a in accounts) {
