@@ -20,8 +20,15 @@ String _group(String digits) {
   return buf.toString();
 }
 
+/// When true, [fmt] shows full two-decimal amounts everywhere instead of the
+/// compact rounded form. Mirrors the user's "Exact values" setting; kept off by
+/// default and updated from [ThemeController] so number widgets stay reactive.
+bool gExactValues = false;
+
 /// Compact form: 1.2M, 45k, 6,800 — used in pills and headers.
+/// Returns the full two-decimal form instead when [gExactValues] is on.
 String fmt(num n) {
+  if (gExactValues) return fmtFull(n);
   final abs = n.abs();
   if (abs >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
   if (abs >= 1000) {
@@ -33,10 +40,11 @@ String fmt(num n) {
 
 /// Full form with two decimals: "270,500.00" (no currency prefix).
 String fmtFull(num n) {
+  final neg = n < 0 ? '-' : '';
   final abs = n.abs();
   final fixed = abs.toStringAsFixed(2);
   final parts = fixed.split('.');
-  return '${_group(parts[0])}.${parts[1]}';
+  return '$neg${_group(parts[0])}.${parts[1]}';
 }
 
 /// "22 May 2026" from a YYYY-MM-DD string.

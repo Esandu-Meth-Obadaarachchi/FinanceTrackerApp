@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../app_info.dart';
 import '../services/auth_service.dart';
 import '../theme/app_text.dart';
 import '../theme/palette.dart';
@@ -11,6 +10,7 @@ import 'accounts_screen.dart';
 import 'dashboard_screen.dart';
 import 'loans_screen.dart';
 import 'modals/sheets.dart';
+import 'settings_screen.dart';
 import 'tax_screen.dart';
 import 'transactions_screen.dart';
 
@@ -272,6 +272,16 @@ class _ProfileMenu extends StatelessWidget {
         ),
         const PopupMenuDivider(),
         PopupMenuItem<String>(
+          value: 'settings',
+          child: Row(
+            children: [
+              Icon(Icons.settings_outlined, size: 16, color: colors.text),
+              const SizedBox(width: 10),
+              Text('Settings', style: sans(size: 13, color: colors.text)),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
           value: 'signout',
           child: Row(
             children: [
@@ -282,22 +292,10 @@ class _ProfileMenu extends StatelessWidget {
             ],
           ),
         ),
-        const PopupMenuDivider(),
-        PopupMenuItem<String>(
-          enabled: false,
-          height: 32,
-          child: Row(
-            children: [
-              Icon(Icons.info_outline, size: 14, color: colors.muted),
-              const SizedBox(width: 8),
-              Text('Version $kAppVersion',
-                  style: sans(size: 12, color: colors.muted)),
-            ],
-          ),
-        ),
       ],
       onSelected: (v) {
         if (v == 'signout') auth.signOut();
+        if (v == 'settings') openSettings(context);
       },
       child: Container(
         width: 36,
