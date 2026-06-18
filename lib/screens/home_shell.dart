@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/auth_service.dart';
+import '../services/messaging_service.dart';
 import '../services/notification_service.dart';
+import '../state/app_state.dart';
 import '../theme/app_text.dart';
 import '../theme/palette.dart';
 import '../theme/theme_controller.dart';
@@ -34,9 +36,11 @@ class _HomeShellState extends State<HomeShell> {
     super.initState();
     // Runs once per signed-in session (HomeShell is keyed by uid). Ask for
     // notification permission, then re-arm the daily reminders from saved prefs.
+    final uid = context.read<AppState>().uid;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await NotificationService.instance.requestPermissions();
       await NotificationService.instance.rearmDailyReminders();
+      await MessagingService.instance.subscribeUser(uid);
     });
   }
 

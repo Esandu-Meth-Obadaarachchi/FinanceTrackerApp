@@ -7,6 +7,7 @@ import 'firebase_options.dart';
 import 'screens/auth/auth_screen.dart';
 import 'screens/home_shell.dart';
 import 'services/auth_service.dart';
+import 'services/messaging_service.dart';
 import 'services/notification_service.dart';
 import 'state/app_state.dart';
 import 'theme/app_text.dart';
@@ -35,6 +36,8 @@ Future<void> main() async {
         options: DefaultFirebaseOptions.currentPlatform,
       );
       firebaseReady = true;
+      // FCM broadcasts (Android/iOS only; no-op on web). Best-effort.
+      await MessagingService.instance.init();
     } catch (_) {
       firebaseReady = false;
     }

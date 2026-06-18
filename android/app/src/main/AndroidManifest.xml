@@ -38,6 +38,12 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
+        <!-- FCM: show background/closed-app notification messages on our
+             "general" channel (created in NotificationService). -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="general" />
+
         <!-- flutter_local_notifications: deliver scheduled notifications and
              re-arm them after a device reboot. -->
         <receiver
