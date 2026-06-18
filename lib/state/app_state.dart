@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/account.dart';
 import '../models/app_transaction.dart';
+import '../models/budget_plan.dart';
 import '../models/loan.dart';
 import '../models/recurring_rule.dart';
 import '../services/firestore_service.dart';
@@ -22,6 +23,7 @@ class AppState extends ChangeNotifier {
   List<AppTransaction> transactions = [];
   List<Loan> loans = [];
   List<RecurringRule> recurringRules = [];
+  Map<String, BudgetPlan> budgets = {}; // keyed by month "YYYY-MM"
 
   bool _accountsReady = false;
   bool _transactionsReady = false;
@@ -32,6 +34,7 @@ class AppState extends ChangeNotifier {
   StreamSubscription? _txSub;
   StreamSubscription? _loanSub;
   StreamSubscription? _recurringSub;
+  StreamSubscription? _budgetSub;
 
   /// True once all collections have produced their first snapshot.
   bool get isLoading =>
@@ -63,6 +66,12 @@ class AppState extends ChangeNotifier {
       _recurringReady = true;
       notifyListeners();
       _materializeRecurring();
+    });
+    // Budgets are independent of the 4-stream load gate — the planner handles
+    // its own empty/loading state, so the rest of the app never waits on them.
+    _budgetSub = _service.budgetsStream().listen((data) {
+      budgets = {for (final b in data) b.month: b};
+      notifyListeners();
     });
   }
 
@@ -109,6 +118,36 @@ class AppState extends ChangeNotifier {
   List<AppTransaction> transactionsInMonth(String monthKey) =>
       transactions.where((t) => t.monthKey == monthKey).toList();
 
+  /// The saved plan for [month], or a blank one if none exists yet.
+  BudgetPlan budgetFor(String month) =>
+      budgets[month] ?? BudgetPlan.empty(month);
+
+  /// Actual expense spend per category for [month] (category label -> total).
+  Map<String, double> expenseByCategoryInMonth(String month) {
+    final out = <String, double>{};
+    for (final t in transactions) {
+      if (t.isExpense && t.monthKey == month) {
+        out[t.category] = (out[t.category] ?? 0) + t.amount;
+      }
+    }
+    return out;
+  }
+
+  /// Distinct, non-empty notes from past transactions, most-recent first.
+  /// Used to suggest history when typing a new transaction's note.
+  /// [transactions] is already ordered by date descending, so first-seen wins.
+  List<String> pastNotes({String? type}) {
+    final seen = <String>{};
+    final out = <String>[];
+    for (final t in transactions) {
+      if (type != null && t.type != type) continue;
+      final note = t.note.trim();
+      if (note.isEmpty) continue;
+      if (seen.add(note.toLowerCase())) out.add(note);
+    }
+    return out;
+  }
+
   // ── Account operations ─────────────────────────────────────────────────
   Future<void> addAccount(Account a) => _service.addAccount(a);
   Future<void> updateAccount(Account a) => _service.updateAccount(a);
@@ -135,6 +174,9 @@ class AppState extends ChangeNotifier {
   Future<void> setRecurringActive(String id, bool active) =>
       _service.updateRecurring(id, {'active': active});
   Future<void> deleteRecurring(String id) => _service.deleteRecurring(id);
+
+  // ── Budget plan operations ─────────────────────────────────────────────
+  Future<void> setBudget(BudgetPlan b) => _service.setBudget(b);
 
   // ── Recurring materialization ──────────────────────────────────────────
   // Generates the real transactions a rule is due for, one per month from its
@@ -217,6 +259,7 @@ class AppState extends ChangeNotifier {
     _txSub?.cancel();
     _loanSub?.cancel();
     _recurringSub?.cancel();
+    _budgetSub?.cancel();
     super.dispose();
   }
 }

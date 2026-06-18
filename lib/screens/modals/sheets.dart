@@ -389,9 +389,10 @@ class _AddTransactionSheetState extends State<_AddTransactionSheet> {
         ],
 
         const SizedBox(height: 16),
-        AppTextField(
+        AppAutocompleteField(
           colors: colors,
           controller: _note,
+          options: app.pastNotes(type: _type),
           label: 'Note / Description',
           hint: 'e.g. Monthly salary from XYZ',
         ),
