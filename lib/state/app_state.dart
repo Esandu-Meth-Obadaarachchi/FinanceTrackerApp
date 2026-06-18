@@ -7,7 +7,9 @@ import '../models/app_transaction.dart';
 import '../models/budget_plan.dart';
 import '../models/loan.dart';
 import '../models/recurring_rule.dart';
+import '../models/reminder.dart';
 import '../services/firestore_service.dart';
+import '../services/reminder_scheduler.dart';
 import '../utils/formatters.dart';
 
 /// Holds the signed-in user's live data and exposes CRUD operations.
@@ -24,6 +26,7 @@ class AppState extends ChangeNotifier {
   List<Loan> loans = [];
   List<RecurringRule> recurringRules = [];
   Map<String, BudgetPlan> budgets = {}; // keyed by month "YYYY-MM"
+  List<Reminder> reminders = [];
 
   bool _accountsReady = false;
   bool _transactionsReady = false;
@@ -35,6 +38,7 @@ class AppState extends ChangeNotifier {
   StreamSubscription? _loanSub;
   StreamSubscription? _recurringSub;
   StreamSubscription? _budgetSub;
+  StreamSubscription? _reminderSub;
 
   /// True once all collections have produced their first snapshot.
   bool get isLoading =>
@@ -72,6 +76,12 @@ class AppState extends ChangeNotifier {
     _budgetSub = _service.budgetsStream().listen((data) {
       budgets = {for (final b in data) b.month: b};
       notifyListeners();
+    });
+    _reminderSub = _service.remindersStream().listen((data) {
+      reminders = data;
+      notifyListeners();
+      // Keep on-device notifications in sync with the source of truth.
+      ReminderScheduler.syncAll(reminders);
     });
   }
 
@@ -178,6 +188,14 @@ class AppState extends ChangeNotifier {
   // ── Budget plan operations ─────────────────────────────────────────────
   Future<void> setBudget(BudgetPlan b) => _service.setBudget(b);
 
+  // ── Reminder operations ────────────────────────────────────────────────
+  Future<void> addReminder(Reminder r) => _service.addReminder(r);
+  Future<void> updateReminder(Reminder r) => _service.updateReminder(r);
+  Future<void> deleteReminder(Reminder r) async {
+    await ReminderScheduler.cancel(r); // clear its notifications first
+    await _service.deleteReminder(r.id);
+  }
+
   // ── Recurring materialization ──────────────────────────────────────────
   // Generates the real transactions a rule is due for, one per month from its
   // start month up to the current calendar month (backfilling any gaps).
@@ -260,6 +278,7 @@ class AppState extends ChangeNotifier {
     _loanSub?.cancel();
     _recurringSub?.cancel();
     _budgetSub?.cancel();
+    _reminderSub?.cancel();
     super.dispose();
   }
 }

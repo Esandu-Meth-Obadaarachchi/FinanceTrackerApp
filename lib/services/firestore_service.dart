@@ -5,6 +5,7 @@ import '../models/app_transaction.dart';
 import '../models/budget_plan.dart';
 import '../models/loan.dart';
 import '../models/recurring_rule.dart';
+import '../models/reminder.dart';
 
 /// Reads and writes a single user's data under `users/{uid}/...`.
 class FirestoreService {
@@ -26,6 +27,8 @@ class FirestoreService {
       _userDoc.collection('recurring');
   CollectionReference<Map<String, dynamic>> get _budgets =>
       _userDoc.collection('budgets');
+  CollectionReference<Map<String, dynamic>> get _reminders =>
+      _userDoc.collection('reminders');
 
   // ── Streams ────────────────────────────────────────────────────────────
   Stream<List<Account>> accountsStream() => _accounts
@@ -56,6 +59,12 @@ class FirestoreService {
       .snapshots()
       .map((s) =>
           s.docs.map((d) => BudgetPlan.fromMap(d.id, d.data())).toList());
+
+  Stream<List<Reminder>> remindersStream() => _reminders
+      .orderBy('dueDate')
+      .snapshots()
+      .map((s) =>
+          s.docs.map((d) => Reminder.fromMap(d.id, d.data())).toList());
 
   // ── Accounts ───────────────────────────────────────────────────────────
   Future<void> addAccount(Account a) =>
@@ -100,4 +109,13 @@ class FirestoreService {
         {...b.toMap(), 'createdAt': FieldValue.serverTimestamp()},
         SetOptions(merge: true),
       );
+
+  // ── Reminders ──────────────────────────────────────────────────────────
+  Future<void> addReminder(Reminder r) =>
+      _reminders.add({...r.toMap(), 'createdAt': FieldValue.serverTimestamp()});
+
+  Future<void> updateReminder(Reminder r) =>
+      _reminders.doc(r.id).update(r.toMap());
+
+  Future<void> deleteReminder(String id) => _reminders.doc(id).delete();
 }
