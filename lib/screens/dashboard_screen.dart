@@ -10,6 +10,7 @@ import '../theme/theme_controller.dart';
 import '../utils/color_x.dart';
 import '../utils/formatters.dart';
 import '../widgets/common.dart';
+import 'budget_screen.dart';
 import 'modals/sheets.dart';
 
 /// Overview screen: net worth, accounts, budget, breakdown, recent activity.
@@ -50,7 +51,10 @@ class DashboardScreen extends StatelessWidget {
         const SizedBox(height: 16),
         _accountsRow(context, colors, app),
         const SizedBox(height: 16),
-        _budgetCard(colors, income, expenses, pending),
+        GestureDetector(
+          onTap: () => openBudgetPlanner(context, month: month),
+          child: _budgetCard(colors, income, expenses, pending),
+        ),
         if (lent > 0 || pending > 0) ...[
           const SizedBox(height: 16),
           _receivablesCard(colors, lent, pending),
@@ -233,8 +237,17 @@ class DashboardScreen extends StatelessWidget {
                       size: 14,
                       weight: FontWeight.w700,
                       color: colors.text)),
-              Text(fmtMonthLong(month),
-                  style: sans(size: 12, color: colors.sub)),
+              Row(
+                children: [
+                  Text('Plan',
+                      style: sans(
+                          size: 12,
+                          weight: FontWeight.w600,
+                          color: const Color(0xFF3DEBA8))),
+                  Icon(Icons.chevron_right,
+                      size: 16, color: const Color(0xFF3DEBA8)),
+                ],
+              ),
             ],
           ),
           const SizedBox(height: 14),

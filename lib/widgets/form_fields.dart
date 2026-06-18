@@ -46,6 +46,7 @@ class AppTextField extends StatelessWidget {
     this.autofocus = false,
     this.obscure = false,
     this.onSubmitted,
+    this.onChanged,
   });
 
   final Palette colors;
@@ -57,6 +58,7 @@ class AppTextField extends StatelessWidget {
   final bool autofocus;
   final bool obscure;
   final ValueChanged<String>? onSubmitted;
+  final ValueChanged<String>? onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -71,6 +73,7 @@ class AppTextField extends StatelessWidget {
           autofocus: autofocus,
           obscureText: obscure,
           onSubmitted: onSubmitted,
+          onChanged: onChanged,
           style: (isNumber ? mono(size: 14) : sans(size: 14))
               .copyWith(color: colors.text),
           cursorColor: const Color(0xFF3DEBA8),
@@ -97,6 +100,147 @@ class AppTextField extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         borderSide: BorderSide(color: c),
       );
+}
+
+/// A labelled single-line text field that suggests matching past entries.
+///
+/// Looks identical to [AppTextField] but shows a dropdown of [options] filtered
+/// by what's typed (case-insensitive substring match). Selecting one fills the
+/// shared [controller]. Falls back to a plain field when [options] is empty.
+class AppAutocompleteField extends StatefulWidget {
+  const AppAutocompleteField({
+    super.key,
+    required this.colors,
+    required this.controller,
+    required this.options,
+    this.label,
+    this.hint,
+  });
+
+  final Palette colors;
+  final TextEditingController controller;
+  final List<String> options;
+  final String? label;
+  final String? hint;
+
+  @override
+  State<AppAutocompleteField> createState() => _AppAutocompleteFieldState();
+}
+
+class _AppAutocompleteFieldState extends State<AppAutocompleteField> {
+  final FocusNode _focus = FocusNode();
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  OutlineInputBorder _border(Color c) => OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: c),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = widget.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (widget.label != null) FieldLabel(widget.label!, colors: colors),
+        RawAutocomplete<String>(
+          textEditingController: widget.controller,
+          focusNode: _focus,
+          optionsBuilder: (value) {
+            final q = value.text.trim().toLowerCase();
+            if (q.isEmpty) return const Iterable<String>.empty();
+            final matches = widget.options
+                .where((o) => o.toLowerCase().contains(q) &&
+                    o.toLowerCase() != q)
+                .take(6);
+            return matches;
+          },
+          onSelected: (selection) => widget.controller.text = selection,
+          fieldViewBuilder:
+              (context, textController, focusNode, onFieldSubmitted) {
+            return TextField(
+              controller: textController,
+              focusNode: focusNode,
+              onSubmitted: (_) => onFieldSubmitted(),
+              style: sans(size: 14).copyWith(color: colors.text),
+              cursorColor: const Color(0xFF3DEBA8),
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: widget.hint,
+                hintStyle: sans(size: 14, color: colors.muted),
+                filled: true,
+                fillColor: colors.inputBg,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+                border: _border(colors.inputBorder),
+                enabledBorder: _border(colors.inputBorder),
+                focusedBorder: _border(const Color(0xFF3DEBA8)),
+              ),
+            );
+          },
+          optionsViewBuilder: (context, onSelected, options) {
+            return Align(
+              alignment: Alignment.topLeft,
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  margin: const EdgeInsets.only(top: 4),
+                  constraints: const BoxConstraints(maxHeight: 220, maxWidth: 420),
+                  decoration: BoxDecoration(
+                    color: colors.card,
+                    border: Border.all(color: colors.inputBorder),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.18),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: ListView.builder(
+                    padding: EdgeInsets.zero,
+                    shrinkWrap: true,
+                    itemCount: options.length,
+                    itemBuilder: (context, i) {
+                      final opt = options.elementAt(i);
+                      return InkWell(
+                        onTap: () => onSelected(opt),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 11),
+                          child: Row(
+                            children: [
+                              Icon(Icons.history,
+                                  size: 15, color: colors.muted),
+                              const SizedBox(width: 9),
+                              Expanded(
+                                child: Text(
+                                  opt,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: sans(size: 14, color: colors.text),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
 }
 
 /// A labelled dropdown.

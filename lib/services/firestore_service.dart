@@ -2,8 +2,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/account.dart';
 import '../models/app_transaction.dart';
+import '../models/budget_plan.dart';
 import '../models/loan.dart';
 import '../models/recurring_rule.dart';
+import '../models/reminder.dart';
 
 /// Reads and writes a single user's data under `users/{uid}/...`.
 class FirestoreService {
@@ -23,6 +25,10 @@ class FirestoreService {
       _userDoc.collection('loans');
   CollectionReference<Map<String, dynamic>> get _recurring =>
       _userDoc.collection('recurring');
+  CollectionReference<Map<String, dynamic>> get _budgets =>
+      _userDoc.collection('budgets');
+  CollectionReference<Map<String, dynamic>> get _reminders =>
+      _userDoc.collection('reminders');
 
   // ── Streams ────────────────────────────────────────────────────────────
   Stream<List<Account>> accountsStream() => _accounts
@@ -46,6 +52,19 @@ class FirestoreService {
       .snapshots()
       .map((s) =>
           s.docs.map((d) => RecurringRule.fromMap(d.id, d.data())).toList());
+
+  /// All budget plans (one doc per month). Small collection, read unordered;
+  /// AppState keys them by month.
+  Stream<List<BudgetPlan>> budgetsStream() => _budgets
+      .snapshots()
+      .map((s) =>
+          s.docs.map((d) => BudgetPlan.fromMap(d.id, d.data())).toList());
+
+  Stream<List<Reminder>> remindersStream() => _reminders
+      .orderBy('dueDate')
+      .snapshots()
+      .map((s) =>
+          s.docs.map((d) => Reminder.fromMap(d.id, d.data())).toList());
 
   // ── Accounts ───────────────────────────────────────────────────────────
   Future<void> addAccount(Account a) =>
@@ -82,4 +101,21 @@ class FirestoreService {
       _recurring.doc(id).update(changes);
 
   Future<void> deleteRecurring(String id) => _recurring.doc(id).delete();
+
+  // ── Budget plans ─────────────────────────────────────────────────────────
+  // Upsert keyed by month. `createdAt` doubles as last-updated here since the
+  // doc is rewritten on each save (merge keeps any future extra fields).
+  Future<void> setBudget(BudgetPlan b) => _budgets.doc(b.month).set(
+        {...b.toMap(), 'createdAt': FieldValue.serverTimestamp()},
+        SetOptions(merge: true),
+      );
+
+  // ── Reminders ──────────────────────────────────────────────────────────
+  Future<void> addReminder(Reminder r) =>
+      _reminders.add({...r.toMap(), 'createdAt': FieldValue.serverTimestamp()});
+
+  Future<void> updateReminder(Reminder r) =>
+      _reminders.doc(r.id).update(r.toMap());
+
+  Future<void> deleteReminder(String id) => _reminders.doc(id).delete();
 }

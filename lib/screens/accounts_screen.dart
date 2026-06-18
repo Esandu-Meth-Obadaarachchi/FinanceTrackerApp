@@ -115,39 +115,44 @@ class AccountsScreen extends StatelessWidget {
       ),
       child: Column(
         children: [
-          // Header
-          Container(
-            padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.07),
-              border: Border(bottom: BorderSide(color: colors.border)),
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(20)),
-            ),
-            child: Row(
-              children: [
-                AccountIconBox(type: acc.type, color: color, size: 44),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(acc.name,
-                          style: sans(
-                              size: 16,
-                              weight: FontWeight.w700,
-                              color: colors.text)),
-                      Text(acc.typeLabel,
-                          style: sans(size: 12, color: colors.sub)),
-                    ],
+          // Header (tap to edit)
+          InkWell(
+            onTap: () => showAddAccountSheet(context, edit: acc),
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(20)),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.07),
+                border: Border(bottom: BorderSide(color: colors.border)),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              child: Row(
+                children: [
+                  AccountIconBox(type: acc.type, color: color, size: 44),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(acc.name,
+                            style: sans(
+                                size: 16,
+                                weight: FontWeight.w700,
+                                color: colors.text)),
+                        Text(acc.typeLabel,
+                            style: sans(size: 12, color: colors.sub)),
+                      ],
+                    ),
                   ),
-                ),
-                Text('Rs ${fmt(app.balanceOf(acc))}',
-                    style: mono(
-                        size: 22,
-                        weight: FontWeight.w800,
-                        color: colors.text)),
-              ],
+                  Text('Rs ${fmt(app.balanceOf(acc))}',
+                      style: mono(
+                          size: 22,
+                          weight: FontWeight.w800,
+                          color: colors.text)),
+                ],
+              ),
             ),
           ),
           // Body

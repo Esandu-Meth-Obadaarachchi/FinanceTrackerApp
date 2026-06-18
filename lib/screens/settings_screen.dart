@@ -1,18 +1,30 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../app_info.dart';
+import '../services/notification_service.dart';
+import '../services/sms_service.dart';
+import '../state/app_state.dart';
 import '../theme/app_text.dart';
 import '../theme/palette.dart';
 import '../theme/theme_controller.dart';
 import '../utils/formatters.dart';
 import '../widgets/common.dart';
+import 'reminders_screen.dart';
 
 /// Opens the settings screen. [ThemeController] lives above MaterialApp so it
-/// is reachable on the pushed route without re-providing.
+/// is reachable on the pushed route; [AppState] is re-provided because the
+/// reminders + SMS controls below need it.
 void openSettings(BuildContext context) {
+  final app = context.read<AppState>();
   Navigator.of(context).push(
-    MaterialPageRoute(builder: (_) => const SettingsScreen()),
+    MaterialPageRoute(
+      builder: (_) => ChangeNotifierProvider<AppState>.value(
+        value: app,
+        child: const SettingsScreen(),
+      ),
+    ),
   );
 }
 
@@ -71,6 +83,48 @@ class SettingsScreen extends StatelessWidget {
               onChanged: (_) => theme.toggle(),
             ),
           ),
+          if (!kIsWeb) ...[
+            const SizedBox(height: 18),
+            _sectionLabel(colors, 'DAILY REMINDERS'),
+            _DailyRemindersCard(colors: colors),
+          ],
+          const SizedBox(height: 18),
+          _sectionLabel(colors, 'PAYMENT REMINDERS'),
+          InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => openReminders(context),
+            child: AppCard(
+              colors: colors,
+              child: Row(
+                children: [
+                  Icon(Icons.notifications_active_outlined,
+                      size: 20, color: colors.sub),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Due payment reminders',
+                            style: sans(
+                                size: 14.5,
+                                weight: FontWeight.w600,
+                                color: colors.text)),
+                        const SizedBox(height: 2),
+                        Text('Bills, card payments, rent — set custom nudges.',
+                            style: sans(size: 12, color: colors.sub)),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right, size: 20, color: colors.sub),
+                ],
+              ),
+            ),
+          ),
+          if (SmsService.instance.isSupported) ...[
+            const SizedBox(height: 18),
+            _sectionLabel(colors, 'BANK SMS'),
+            _SmsImportCard(colors: colors),
+          ],
           const SizedBox(height: 18),
           _sectionLabel(colors, 'ABOUT'),
           AppCard(
@@ -149,6 +203,236 @@ class SettingsScreen extends StatelessWidget {
             activeColor: const Color(0xFF3DEBA8),
             activeTrackColor: const Color(0xFF3DEBA8).withValues(alpha: 0.5),
             onChanged: onChanged,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Morning + night "log your transactions" reminders. Loads saved times,
+/// persists + reschedules on every change. Android/iOS only (hidden on web).
+class _DailyRemindersCard extends StatefulWidget {
+  const _DailyRemindersCard({required this.colors});
+  final Palette colors;
+
+  @override
+  State<_DailyRemindersCard> createState() => _DailyRemindersCardState();
+}
+
+class _DailyRemindersCardState extends State<_DailyRemindersCard> {
+  DailyReminderPrefs? _prefs;
+
+  @override
+  void initState() {
+    super.initState();
+    NotificationService.instance.loadDailyPrefs().then((p) {
+      if (mounted) setState(() => _prefs = p);
+    });
+  }
+
+  Future<void> _update(DailyReminderPrefs next) async {
+    setState(() => _prefs = next);
+    await NotificationService.instance.requestPermissions();
+    await NotificationService.instance.saveDailyPrefs(next);
+  }
+
+  Future<void> _pickTime(bool morning) async {
+    final p = _prefs!;
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: morning ? p.morningTime : p.nightTime,
+    );
+    if (picked == null) return;
+    _update(morning
+        ? p.copyWith(morningTime: picked)
+        : p.copyWith(nightTime: picked));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = widget.colors;
+    final p = _prefs;
+    if (p == null) {
+      return AppCard(
+        colors: colors,
+        child: Text('Loading…', style: sans(size: 13, color: colors.sub)),
+      );
+    }
+    return AppCard(
+      colors: colors,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Column(
+        children: [
+          _reminderRow(
+            colors,
+            Icons.wb_sunny_outlined,
+            'Morning nudge',
+            'Start the day by logging anything outstanding.',
+            p.morningOn,
+            p.morningTime,
+            (v) => _update(p.copyWith(morningOn: v)),
+            () => _pickTime(true),
+          ),
+          ThinDivider(colors: colors, indent: 8),
+          _reminderRow(
+            colors,
+            Icons.nightlight_outlined,
+            'Night nudge',
+            "Record today's spending before bed.",
+            p.nightOn,
+            p.nightTime,
+            (v) => _update(p.copyWith(nightOn: v)),
+            () => _pickTime(false),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _reminderRow(
+    Palette colors,
+    IconData icon,
+    String title,
+    String subtitle,
+    bool value,
+    TimeOfDay time,
+    ValueChanged<bool> onToggle,
+    VoidCallback onPickTime,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: colors.sub),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: sans(
+                        size: 14.5,
+                        weight: FontWeight.w600,
+                        color: colors.text)),
+                const SizedBox(height: 2),
+                Text(subtitle, style: sans(size: 12, color: colors.sub)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          Opacity(
+            opacity: value ? 1 : 0.4,
+            child: GestureDetector(
+              onTap: value ? onPickTime : null,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: colors.inputBg,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(time.format(context),
+                    style: mono(
+                        size: 13,
+                        weight: FontWeight.w700,
+                        color: colors.text)),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Switch(
+            value: value,
+            activeColor: const Color(0xFF3DEBA8),
+            activeTrackColor: const Color(0xFF3DEBA8).withValues(alpha: 0.5),
+            onChanged: onToggle,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Opt-in toggle for auto-importing bank debit/credit SMS (Android only).
+class _SmsImportCard extends StatefulWidget {
+  const _SmsImportCard({required this.colors});
+  final Palette colors;
+
+  @override
+  State<_SmsImportCard> createState() => _SmsImportCardState();
+}
+
+class _SmsImportCardState extends State<_SmsImportCard> {
+  bool _enabled = false;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    SmsService.instance.isEnabled().then((v) {
+      if (mounted) setState(() => _enabled = v);
+    });
+  }
+
+  Future<void> _toggle(bool v) async {
+    setState(() => _busy = true);
+    final app = context.read<AppState>();
+    final effective = await SmsService.instance.setEnabled(v, app);
+    if (!mounted) return;
+    setState(() {
+      _enabled = effective;
+      _busy = false;
+    });
+    if (v && !effective) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('SMS permission denied — auto-import stays off')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = widget.colors;
+    return AppCard(
+      colors: colors,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.sms_outlined, size: 20, color: colors.sub),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text('Auto-import bank SMS',
+                    style: sans(
+                        size: 14.5,
+                        weight: FontWeight.w600,
+                        color: colors.text)),
+              ),
+              const SizedBox(width: 8),
+              if (_busy)
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2.2, color: Color(0xFF3DEBA8)),
+                )
+              else
+                Switch(
+                  value: _enabled,
+                  activeColor: const Color(0xFF3DEBA8),
+                  activeTrackColor:
+                      const Color(0xFF3DEBA8).withValues(alpha: 0.5),
+                  onChanged: _toggle,
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Reads incoming bank messages and posts matching debit/credit '
+            'texts to the account whose card/account tail they mention. Set '
+            'those tails on each account (tap an account to edit). Messages '
+            'that don\'t clearly match are ignored.',
+            style: sans(size: 12, color: colors.sub),
           ),
         ],
       ),
