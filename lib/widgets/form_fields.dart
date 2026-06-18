@@ -46,6 +46,7 @@ class AppTextField extends StatelessWidget {
     this.autofocus = false,
     this.obscure = false,
     this.onSubmitted,
+    this.onChanged,
   });
 
   final Palette colors;
@@ -57,6 +58,7 @@ class AppTextField extends StatelessWidget {
   final bool autofocus;
   final bool obscure;
   final ValueChanged<String>? onSubmitted;
+  final ValueChanged<String>? onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -71,6 +73,7 @@ class AppTextField extends StatelessWidget {
           autofocus: autofocus,
           obscureText: obscure,
           onSubmitted: onSubmitted,
+          onChanged: onChanged,
           style: (isNumber ? mono(size: 14) : sans(size: 14))
               .copyWith(color: colors.text),
           cursorColor: const Color(0xFF3DEBA8),

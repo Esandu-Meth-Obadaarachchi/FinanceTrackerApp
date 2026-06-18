@@ -349,6 +349,25 @@ class _BudgetScreenState extends State<BudgetScreen> {
                     over ? _expense : categoryColor(cat)),
               ),
             ),
+            for (final item in plan.itemsFor(cat)) ...[
+              const SizedBox(height: 7),
+              Row(
+                children: [
+                  Icon(Icons.subdirectory_arrow_right,
+                      size: 13, color: colors.muted),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                        item.name.isNotEmpty ? item.name : 'Item',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: sans(size: 12.5, color: colors.sub)),
+                  ),
+                  Text('Rs ${fmt(item.amount)}',
+                      style: mono(size: 12, color: colors.sub)),
+                ],
+              ),
+            ],
             if (over) ...[
               const SizedBox(height: 6),
               Align(
@@ -521,18 +540,47 @@ class _AllocationEditorSheet extends StatefulWidget {
   State<_AllocationEditorSheet> createState() => _AllocationEditorSheetState();
 }
 
+/// One editable line item (name + amount) inside the allocation editor.
+class _ItemRow {
+  _ItemRow({String name = '', String amount = ''})
+      : key = UniqueKey(),
+        name = TextEditingController(text: name),
+        amount = TextEditingController(text: amount);
+  final Key key;
+  final TextEditingController name;
+  final TextEditingController amount;
+  void dispose() {
+    name.dispose();
+    amount.dispose();
+  }
+}
+
 class _AllocationEditorSheetState extends State<_AllocationEditorSheet> {
-  late final TextEditingController _amount;
   late String _category;
+  final List<_ItemRow> _rows = [];
 
   @override
   void initState() {
     super.initState();
-    final app = context.read<AppState>();
-    final plan = app.budgetFor(widget.month);
+    final plan = context.read<AppState>().budgetFor(widget.month);
     _category = widget.category ?? _firstUnallocated(plan);
-    final cur = plan.allocations[_category] ?? 0;
-    _amount = TextEditingController(text: cur > 0 ? _trim(cur) : '');
+    _seedRows(plan);
+  }
+
+  void _seedRows(BudgetPlan plan) {
+    for (final r in _rows) {
+      r.dispose();
+    }
+    _rows.clear();
+    final existing = plan.itemsFor(_category);
+    if (existing.isNotEmpty) {
+      for (final item in existing) {
+        _rows.add(_ItemRow(name: item.name, amount: _trim(item.amount)));
+      }
+    } else {
+      final cur = plan.allocations[_category] ?? 0;
+      _rows.add(_ItemRow(amount: cur > 0 ? _trim(cur) : ''));
+    }
   }
 
   String _firstUnallocated(BudgetPlan plan) {
@@ -545,19 +593,32 @@ class _AllocationEditorSheetState extends State<_AllocationEditorSheet> {
   String _trim(double v) =>
       v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();
 
+  double get _total => _rows.fold(
+      0.0, (s, r) => s + (double.tryParse(r.amount.text.trim()) ?? 0));
+
+  List<BudgetItem> _buildItems() => _rows
+      .map((r) => BudgetItem(
+            name: r.name.text.trim(),
+            amount: double.tryParse(r.amount.text.trim()) ?? 0,
+          ))
+      .toList();
+
   @override
   void dispose() {
-    _amount.dispose();
+    for (final r in _rows) {
+      r.dispose();
+    }
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.read<ThemeController>().colors;
-    final app = context.watch<AppState>();
+    final app = context.read<AppState>();
     final plan = app.budgetFor(widget.month);
     final isEdit = widget.category != null;
     final spent = app.expenseByCategoryInMonth(widget.month)[_category] ?? 0;
+    final multi = _rows.length > 1;
 
     return SheetScaffold(
       title: isEdit ? 'Edit allocation' : 'Add allocation',
@@ -584,19 +645,58 @@ class _AllocationEditorSheetState extends State<_AllocationEditorSheet> {
             ],
             onChanged: (v) => setState(() {
               _category = v ?? _category;
-              final cur = plan.allocations[_category] ?? 0;
-              _amount.text = cur > 0 ? _trim(cur) : '';
+              _seedRows(plan);
             }),
           ),
         const SizedBox(height: 14),
-        AppTextField(
-          colors: colors,
-          controller: _amount,
-          label: 'Planned amount (LKR)',
-          hint: 'e.g. 25000',
-          prefix: 'Rs',
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        FieldLabel('Items', colors: colors),
+        for (final row in _rows) _itemRow(colors, row),
+        const SizedBox(height: 2),
+        GestureDetector(
+          onTap: () => setState(() => _rows.add(_ItemRow())),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 11),
+            decoration: BoxDecoration(
+              border: Border.all(color: colors.border, width: 1.5),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.add, size: 16, color: colors.sub),
+                const SizedBox(width: 6),
+                Text('Add item',
+                    style: sans(
+                        size: 13, weight: FontWeight.w600, color: colors.sub)),
+              ],
+            ),
+          ),
         ),
+        if (multi) ...[
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+            decoration: BoxDecoration(
+              color: const Color(0xFF3DEBA8).withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Category total',
+                    style: sans(
+                        size: 13,
+                        weight: FontWeight.w600,
+                        color: colors.text)),
+                Text('Rs ${fmtFull(_total)}',
+                    style: mono(
+                        size: 15,
+                        weight: FontWeight.w800,
+                        color: const Color(0xFF3DEBA8))),
+              ],
+            ),
+          ),
+        ],
         if (spent > 0) ...[
           const SizedBox(height: 10),
           Text('Already spent this month: Rs ${fmtFull(spent)}',
@@ -606,8 +706,7 @@ class _AllocationEditorSheetState extends State<_AllocationEditorSheet> {
         PrimaryButton(
           label: 'Save',
           onPressed: () {
-            final amt = double.tryParse(_amount.text.trim()) ?? 0;
-            app.setBudget(plan.withAllocation(_category, amt));
+            app.setBudget(plan.withItems(_category, _buildItems()));
             Navigator.of(context).pop();
           },
         ),
@@ -615,7 +714,7 @@ class _AllocationEditorSheetState extends State<_AllocationEditorSheet> {
           const SizedBox(height: 10),
           GestureDetector(
             onTap: () {
-              app.setBudget(plan.withAllocation(_category, 0));
+              app.setBudget(plan.withItems(_category, const []));
               Navigator.of(context).pop();
             },
             child: Center(
@@ -631,6 +730,52 @@ class _AllocationEditorSheetState extends State<_AllocationEditorSheet> {
           ),
         ],
       ],
+    );
+  }
+
+  Widget _itemRow(Palette colors, _ItemRow row) {
+    return Padding(
+      key: row.key,
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: AppTextField(
+              colors: colors,
+              controller: row.name,
+              hint: 'e.g. Claude',
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 116,
+            child: AppTextField(
+              colors: colors,
+              controller: row.amount,
+              hint: '0',
+              prefix: 'Rs',
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              onChanged: (_) => setState(() {}),
+            ),
+          ),
+          IconButton(
+            onPressed: _rows.length == 1
+                ? null
+                : () => setState(() {
+                      _rows.remove(row);
+                      row.dispose();
+                    }),
+            icon: Icon(Icons.close,
+                size: 18,
+                color: _rows.length == 1 ? colors.muted : _expense),
+            splashRadius: 18,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+          ),
+        ],
+      ),
     );
   }
 }
