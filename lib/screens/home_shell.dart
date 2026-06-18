@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/auth_service.dart';
+import '../services/notification_service.dart';
 import '../theme/app_text.dart';
 import '../theme/palette.dart';
 import '../theme/theme_controller.dart';
@@ -27,6 +28,17 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   AppScreen _screen = AppScreen.dashboard;
   late String _month = monthKeyOf(DateTime.now());
+
+  @override
+  void initState() {
+    super.initState();
+    // Runs once per signed-in session (HomeShell is keyed by uid). Ask for
+    // notification permission, then re-arm the daily reminders from saved prefs.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await NotificationService.instance.requestPermissions();
+      await NotificationService.instance.rearmDailyReminders();
+    });
+  }
 
   static const _titles = {
     AppScreen.dashboard: 'Overview',

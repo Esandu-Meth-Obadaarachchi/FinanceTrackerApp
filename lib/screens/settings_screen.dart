@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../app_info.dart';
+import '../services/notification_service.dart';
 import '../theme/app_text.dart';
 import '../theme/palette.dart';
 import '../theme/theme_controller.dart';
@@ -71,6 +73,11 @@ class SettingsScreen extends StatelessWidget {
               onChanged: (_) => theme.toggle(),
             ),
           ),
+          if (!kIsWeb) ...[
+            const SizedBox(height: 18),
+            _sectionLabel(colors, 'DAILY REMINDERS'),
+            _DailyRemindersCard(colors: colors),
+          ],
           const SizedBox(height: 18),
           _sectionLabel(colors, 'ABOUT'),
           AppCard(
@@ -149,6 +156,149 @@ class SettingsScreen extends StatelessWidget {
             activeColor: const Color(0xFF3DEBA8),
             activeTrackColor: const Color(0xFF3DEBA8).withValues(alpha: 0.5),
             onChanged: onChanged,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Morning + night "log your transactions" reminders. Loads saved times,
+/// persists + reschedules on every change. Android/iOS only (hidden on web).
+class _DailyRemindersCard extends StatefulWidget {
+  const _DailyRemindersCard({required this.colors});
+  final Palette colors;
+
+  @override
+  State<_DailyRemindersCard> createState() => _DailyRemindersCardState();
+}
+
+class _DailyRemindersCardState extends State<_DailyRemindersCard> {
+  DailyReminderPrefs? _prefs;
+
+  @override
+  void initState() {
+    super.initState();
+    NotificationService.instance.loadDailyPrefs().then((p) {
+      if (mounted) setState(() => _prefs = p);
+    });
+  }
+
+  Future<void> _update(DailyReminderPrefs next) async {
+    setState(() => _prefs = next);
+    await NotificationService.instance.requestPermissions();
+    await NotificationService.instance.saveDailyPrefs(next);
+  }
+
+  Future<void> _pickTime(bool morning) async {
+    final p = _prefs!;
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: morning ? p.morningTime : p.nightTime,
+    );
+    if (picked == null) return;
+    _update(morning
+        ? p.copyWith(morningTime: picked)
+        : p.copyWith(nightTime: picked));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = widget.colors;
+    final p = _prefs;
+    if (p == null) {
+      return AppCard(
+        colors: colors,
+        child: Text('Loading…', style: sans(size: 13, color: colors.sub)),
+      );
+    }
+    return AppCard(
+      colors: colors,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Column(
+        children: [
+          _reminderRow(
+            colors,
+            Icons.wb_sunny_outlined,
+            'Morning nudge',
+            'Start the day by logging anything outstanding.',
+            p.morningOn,
+            p.morningTime,
+            (v) => _update(p.copyWith(morningOn: v)),
+            () => _pickTime(true),
+          ),
+          ThinDivider(colors: colors, indent: 8),
+          _reminderRow(
+            colors,
+            Icons.nightlight_outlined,
+            'Night nudge',
+            "Record today's spending before bed.",
+            p.nightOn,
+            p.nightTime,
+            (v) => _update(p.copyWith(nightOn: v)),
+            () => _pickTime(false),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _reminderRow(
+    Palette colors,
+    IconData icon,
+    String title,
+    String subtitle,
+    bool value,
+    TimeOfDay time,
+    ValueChanged<bool> onToggle,
+    VoidCallback onPickTime,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: colors.sub),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: sans(
+                        size: 14.5,
+                        weight: FontWeight.w600,
+                        color: colors.text)),
+                const SizedBox(height: 2),
+                Text(subtitle, style: sans(size: 12, color: colors.sub)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          Opacity(
+            opacity: value ? 1 : 0.4,
+            child: GestureDetector(
+              onTap: value ? onPickTime : null,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: colors.inputBg,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(time.format(context),
+                    style: mono(
+                        size: 13,
+                        weight: FontWeight.w700,
+                        color: colors.text)),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Switch(
+            value: value,
+            activeColor: const Color(0xFF3DEBA8),
+            activeTrackColor: const Color(0xFF3DEBA8).withValues(alpha: 0.5),
+            onChanged: onToggle,
           ),
         ],
       ),

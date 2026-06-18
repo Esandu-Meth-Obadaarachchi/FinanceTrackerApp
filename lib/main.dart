@@ -7,6 +7,7 @@ import 'firebase_options.dart';
 import 'screens/auth/auth_screen.dart';
 import 'screens/home_shell.dart';
 import 'services/auth_service.dart';
+import 'services/notification_service.dart';
 import 'state/app_state.dart';
 import 'theme/app_text.dart';
 import 'theme/palette.dart';
@@ -17,6 +18,11 @@ Future<void> main() async {
 
   final themeController = ThemeController();
   await themeController.load();
+
+  // Local notifications (daily reminders, custom reminders, foreground push).
+  // No-op on web; never throws. Permission is requested once the user reaches
+  // the home screen (see HomeShell).
+  await NotificationService.instance.init();
 
   // Initialise Firebase. Stays gracefully degraded until
   // `flutterfire configure` injects the real project keys.
