@@ -11,8 +11,12 @@ as your map of conventions and gotchas before editing.
 - **Google Sign-In** — `google_sign_in` (mobile native picker, web popup).
 - **State** — `provider` (ChangeNotifier). No Riverpod, no Bloc.
 - **Fonts** — `google_fonts` (DM Sans for text, DM Mono for figures).
-- **Local prefs** — `shared_preferences` (theme only).
+- **Local prefs** — `shared_preferences` (theme, reminder times, SMS toggle).
 - **CSV export** — `share_plus` (web download + native share).
+- **Local notifications** — `flutter_local_notifications` + `timezone` +
+  `flutter_timezone` (daily + due-payment reminders; Android/iOS, no-op on web).
+- **Push** — `firebase_messaging` (global `all`-topic broadcasts; Android/iOS).
+- **SMS import** — `another_telephony` (Android-only bank-SMS auto-import).
 
 `pubspec.yaml` is the source of truth — keep deps pinned with caret.
 
@@ -32,16 +36,30 @@ lib/
     app_text.dart          — sans()/mono()/label() text-style helpers
   app_info.dart            — kAppVersion (single source of truth; mirror in pubspec)
   models/
-    account.dart, app_transaction.dart, loan.dart, recurring_rule.dart
+    account.dart (has smsIds), app_transaction.dart, loan.dart,
+    recurring_rule.dart, budget_plan.dart, reminder.dart
       Plain Dart, fromMap/toMap. AppTransaction (not Transaction) to avoid
       clashing with cloud_firestore's Transaction.
   data/categories.dart     — Income/Expense categories + colour map + AccountColors
   services/
     auth_service.dart      — Email/password + Google sign-in, friendly errors
     firestore_service.dart — Per-user collections under users/{uid}/...
-  state/app_state.dart     — ChangeNotifier; subscribes to 4 Firestore streams,
-                              exposes balanceOf()/totalBalance/totalLent, CRUD
-                              passthroughs, recurring materialization
+    notification_service.dart — local notifications: init/timezone/channels,
+                              permission, daily-reminder + one-off scheduling,
+                              show(). Web-safe no-op, failure-tolerant
+    reminder_scheduler.dart — maps Reminder docs to deterministic notification
+                              ids; syncAll() reconciles (used by AppState)
+    messaging_service.dart  — FCM: subscribe `all` + per-uid topics, foreground
+                              messages shown via notification_service
+    sms_parser.dart         — pure-Dart bank-SMS regex parser + category guess
+    sms_service.dart        — Android SMS listener + inbox scan -> addTransaction
+  state/app_state.dart     — ChangeNotifier; subscribes to 6 Firestore streams
+                              (accounts, transactions, loans, recurring, budgets,
+                              reminders — last two outside the load gate), exposes
+                              balanceOf()/totalBalance/totalLent, pastNotes(),
+                              budgetFor()/expenseByCategoryInMonth(), CRUD
+                              passthroughs, recurring materialization; syncs
+                              reminders to ReminderScheduler
   utils/
     formatters.dart        — fmt/fmtFull/fmtDate/recentMonths — no `intl` dep.
                               `gExactValues` flag (set by ThemeController) makes
@@ -49,18 +67,26 @@ lib/
     color_x.dart           — Hex <-> Color helpers (uses toARGB32, not .value)
   widgets/
     common.dart            — AppCard, CategoryDot, StatusChip, AccountIconBox, EmptyState, ThinDivider
-    form_fields.dart       — AppTextField, AppDropdown, SegmentedControl<T>, SearchField, PrimaryButton
+    form_fields.dart       — AppTextField, AppAutocompleteField, AppDropdown, SegmentedControl<T>, SearchField, PrimaryButton
     sheet_scaffold.dart    — `showAppSheet()` + SheetScaffold (handle + title + close)
   screens/
     auth/auth_screen.dart  — single screen that toggles sign-in / sign-up
-    home_shell.dart        — top bar, body, custom bottom nav with central FAB
-    dashboard_screen.dart  — net-worth hero, accounts row, monthly budget,
-                              "To Receive" (lent + pending income), breakdown, recent
-    transactions_screen.dart, accounts_screen.dart, loans_screen.dart, tax_screen.dart
+    home_shell.dart        — top bar, body, custom bottom nav with central FAB;
+                              per-session init: notif permission, daily re-arm,
+                              FCM subscribe, SMS start (once accounts load)
+    dashboard_screen.dart  — net-worth hero, accounts row, monthly budget (taps
+                              to planner), "To Receive", breakdown, recent
+    transactions_screen.dart, accounts_screen.dart (tap account = edit),
+    loans_screen.dart, tax_screen.dart
+    budget_screen.dart     — zero-based / envelope planner (openBudgetPlanner)
+    reminders_screen.dart  — custom due-payment reminders (openReminders)
     recurring_screen.dart  — manage fixed monthly automations (openRecurringManager)
-    settings_screen.dart   — display (exact values) + appearance + version (openSettings)
-    modals/sheets.dart     — Type picker, Add/Edit Transaction, Add Account,
-                             Add Loan, Add/Edit Recurring, Tx detail
+    settings_screen.dart   — display, appearance, daily reminders, payment
+                              reminders entry, bank-SMS toggle, version
+                              (openSettings re-provides AppState)
+    modals/sheets.dart     — Type picker, Add/Edit Transaction (note autocomplete),
+                             Add/Edit Account (+ smsIds), Add Loan,
+                             Add/Edit Recurring, Tx detail
 ```
 
 ## Critical patterns
@@ -110,9 +136,44 @@ generated transaction. Reach the manager via `openRecurringManager(context)`
 (re-provides `AppState`, like sheets do) from the Transactions screen.
 
 ### Per-user Firestore layout
-Each user owns a `users/{uid}/{accounts,transactions,loans}` subtree; rules
-restrict access to the owner. Full field-by-field schema, ordering and deploy
-command live in the **Database architecture** section below.
+Each user owns a `users/{uid}/{accounts,transactions,loans,recurring,budgets,reminders}`
+subtree; rules restrict access to the owner. Full field-by-field schema, ordering
+and deploy command live in the **Database architecture** section below.
+
+### Local notifications & reminders
+[`NotificationService`](lib/services/notification_service.dart) is a singleton
+initialised in `main.dart` (timezone via `flutter_timezone`, three Android
+channels: `daily_reminders`, `due_reminders`, `general`). It is a **no-op on
+web** and every call is failure-tolerant; exact-alarm scheduling falls back to
+inexact. `HomeShell` requests permission once per signed-in session and re-arms
+the daily reminders. Daily-reminder prefs (morning/night on + times) live in
+SharedPreferences and are edited from Settings. Custom reminders are stored in
+Firestore and turned into local notifications by
+[`ReminderScheduler`](lib/services/reminder_scheduler.dart): ids are derived
+deterministically from the reminder id, and `AppState` calls `syncAll()` on
+every reminders snapshot (it also cancels reminders that disappeared). Local
+schedules don't survive a reinstall, so they're re-derived from Firestore on
+launch.
+
+### FCM broadcasts (global, manual send)
+[`MessagingService`](lib/services/messaging_service.dart) subscribes every device
+to the `all` topic (and `user_{uid}` for future targeted sends), shows
+foreground messages via the local-notifications plugin, and registers a
+top-level background handler. **Android/iOS only** — the web client SDK can't
+subscribe to topics. On the free tier there's no server: send a broadcast by
+hand from **Firebase Console → Messaging → new notification → target topic
+`all`**. The Android default channel is `general` (manifest meta-data).
+
+### Bank SMS auto-import (Android only)
+[`SmsParser`](lib/services/sms_parser.dart) is pure Dart (unit-testable): it
+returns a result only when a message has an amount, a clear debit/credit
+direction **and** a card/account tail — otherwise null, so OTP/balance noise is
+ignored. [`SmsService`](lib/services/sms_service.dart) (opt-in, toggled in
+Settings; needs `READ_SMS`/`RECEIVE_SMS`) listens live and scans the last 2 days
+of inbox on start; it posts a transaction only when the tail maps to **exactly
+one** account's `smsIds`, de-duping by body signature in SharedPreferences.
+Everything is guarded behind `!kIsWeb && Android` so web/iOS still build. The
+app-killed background case is intentionally not handled.
 
 ### Phone-frame layout on wide screens
 `main.dart`'s `MaterialApp.builder` wraps every route in
@@ -163,14 +224,17 @@ users/{uid}                       — implicit parent; no fields of its own
   ├─ accounts/{accountId}
   ├─ transactions/{txId}
   ├─ loans/{loanId}
-  └─ recurring/{ruleId}
+  ├─ recurring/{ruleId}
+  ├─ budgets/{monthKey}            — one doc per month, id = "YYYY-MM"
+  └─ reminders/{reminderId}
 ```
-`uid` is the FirebaseAuth user id. All three collections are read live as
-streams in [`firestore_service.dart`](lib/services/firestore_service.dart)
-and held in [`AppState`](lib/state/app_state.dart). Every document is written
-with a `createdAt` server timestamp (`FieldValue.serverTimestamp()`) on
-create; it is not part of the model `toMap()` and `update*` calls don't touch
-it.
+`uid` is the FirebaseAuth user id. All collections are read live as streams in
+[`firestore_service.dart`](lib/services/firestore_service.dart) and held in
+[`AppState`](lib/state/app_state.dart). Most documents are written with a
+`createdAt` server timestamp (`FieldValue.serverTimestamp()`) on create; it is
+not part of the model `toMap()` and `update*` calls don't touch it. (Budgets
+are an upsert keyed by month, so their `createdAt` is rewritten on each save and
+behaves as last-updated.)
 
 ### Documents
 
@@ -182,6 +246,7 @@ it.
 | `type` | string | `bank` \| `cash` \| `fd` (fixed deposit) |
 | `colorHex` | string | `#RRGGBB`, default `#3DEBA8` |
 | `openingBalance` | number | the **only** persisted balance figure; live balance is computed (see "Account balance is computed") |
+| `smsIds` | array<string> | card/account number tails (e.g. `"6709"`) used to match bank SMS for auto-import; empty disables it |
 | `createdAt` | timestamp | server-set; stream ordered by this ascending |
 
 **transactions/{txId}** — income / expense / transfer ([app_transaction.dart](lib/models/app_transaction.dart))
@@ -235,6 +300,35 @@ transaction document is created.
 
 See "Recurring transactions are materialized client-side" below.
 
+**budgets/{monthKey}** — zero-based / envelope plan, one per month ([budget_plan.dart](lib/models/budget_plan.dart))
+
+| field | type | notes |
+|---|---|---|
+| `month` | string | `YYYY-MM` (also the doc id) |
+| `plannedIncome` | number | expected income for the month |
+| `allocations` | map<string,number> | category label -> planned amount |
+| `createdAt` | timestamp | server-set; upsert so doubles as last-updated. Stream is **unordered**; AppState keys by month |
+
+Actual spend per category is derived from `transactions` (not stored). The
+zero-based goal is `plannedIncome - sum(allocations) == 0`.
+
+**reminders/{reminderId}** — custom due-payment reminder ([reminder.dart](lib/models/reminder.dart))
+
+| field | type | notes |
+|---|---|---|
+| `title` | string | the reason, e.g. "Credit card minimum payment" |
+| `amount` | number | optional; 0 = none |
+| `dueDate` | string | `YYYY-MM-DD` |
+| `times` | number | how many reminders (>= 1) |
+| `intervalDays` | number | gap between reminders in days (>= 1) |
+| `time` | string | `HH:mm` time of day to fire |
+| `active` | bool | paused reminders schedule nothing |
+| `createdAt` | timestamp | server-set; stream ordered by `dueDate` ascending |
+
+Reminders are materialised into **local** notifications by
+[`reminder_scheduler.dart`](lib/services/reminder_scheduler.dart) (see
+"Local notifications & reminders"). No server send.
+
 ### Security rules
 [`firestore.rules`](firestore.rules) (rules v2) grants read/write on the whole
 `users/{userId}/**` subtree only when `request.auth.uid == userId`. A user can
@@ -245,9 +339,10 @@ firebase deploy --only firestore:rules --project=fintrack-05220041
 
 ### Indexes
 [`firestore.indexes.json`](firestore.indexes.json) is empty — every stream
-sorts on a single field (`createdAt` or `date`), so only Firestore's automatic
-single-field indexes are needed. Adding a query that filters + orders on
-different fields will require a composite index here.
+sorts on a single field (`createdAt`, `date` or `dueDate`) or is unordered
+(`budgets`), so only Firestore's automatic single-field indexes are needed.
+Adding a query that filters + orders on different fields will require a
+composite index here.
 
 ## Firebase project
 
@@ -280,8 +375,19 @@ flutter build web --release && netlify deploy --prod --dir=build/web --no-build
 ## Android
 
 - `applicationId = com.example.financialtracker`
-- `minSdk = 23` (firebase_auth requirement), `multiDexEnabled = true`
+- `minSdk = flutter.minSdkVersion` (>= 23, the firebase_auth requirement),
+  `multiDexEnabled = true`
 - `ndkVersion = "27.0.12077973"` — pinned because Firebase plugins need 27+
+- **Core library desugaring** is enabled (`isCoreLibraryDesugaringEnabled` +
+  `desugar_jdk_libs`) — required by `flutter_local_notifications` for scheduled
+  notifications.
+- Permissions in [AndroidManifest.xml](android/app/src/main/AndroidManifest.xml):
+  `POST_NOTIFICATIONS`, `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`,
+  `RECEIVE_BOOT_COMPLETED`, `VIBRATE` (notifications) and `READ_SMS`,
+  `RECEIVE_SMS` (SMS import). The flutter_local_notifications scheduled + boot
+  receivers and the FCM `default_notification_channel_id` meta-data live there
+  too. `READ_SMS`/`RECEIVE_SMS` mean Play Store would reject it — distribute the
+  Android build as a **sideloaded APK**.
 - Debug SHA-1 + SHA-256 are registered with the Firebase Android app; if
   the debug keystore rotates, re-register via the Firebase Management API
   (see `/tmp/fb_setup.py` for the pattern — uses the firebase-tools token

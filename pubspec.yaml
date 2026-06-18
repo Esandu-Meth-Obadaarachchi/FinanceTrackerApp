@@ -2,7 +2,7 @@ name: financialtracker
 description: "FinTrack — a personal financial tracker with cloud sync."
 publish_to: 'none'
 
-version: 3.1.0+4
+version: 3.2.0+5
 
 environment:
   sdk: ^3.8.1
@@ -32,10 +32,16 @@ dependencies:
 
   # Google sign-in
   google_sign_in: ^6.2.1
+
+  # Local notifications (daily + due-payment reminders) and timezone resolution
   flutter_local_notifications: ^22.0.1
   timezone: ^0.11.0
   flutter_timezone: ^5.1.0
+
+  # Push broadcasts (FCM)
   firebase_messaging: ^15.2.10
+
+  # Android bank-SMS auto-import
   another_telephony: ^0.4.1
 
 dev_dependencies:
