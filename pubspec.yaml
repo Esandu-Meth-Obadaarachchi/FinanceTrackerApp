@@ -36,6 +36,7 @@ dependencies:
   timezone: ^0.11.0
   flutter_timezone: ^5.1.0
   firebase_messaging: ^15.2.10
+  another_telephony: ^0.4.1
 
 dev_dependencies:
   flutter_test:

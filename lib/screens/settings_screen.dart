@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 
 import '../app_info.dart';
 import '../services/notification_service.dart';
+import '../services/sms_service.dart';
+import '../state/app_state.dart';
 import '../theme/app_text.dart';
 import '../theme/palette.dart';
 import '../theme/theme_controller.dart';
@@ -12,10 +14,17 @@ import '../widgets/common.dart';
 import 'reminders_screen.dart';
 
 /// Opens the settings screen. [ThemeController] lives above MaterialApp so it
-/// is reachable on the pushed route without re-providing.
+/// is reachable on the pushed route; [AppState] is re-provided because the
+/// reminders + SMS controls below need it.
 void openSettings(BuildContext context) {
+  final app = context.read<AppState>();
   Navigator.of(context).push(
-    MaterialPageRoute(builder: (_) => const SettingsScreen()),
+    MaterialPageRoute(
+      builder: (_) => ChangeNotifierProvider<AppState>.value(
+        value: app,
+        child: const SettingsScreen(),
+      ),
+    ),
   );
 }
 
@@ -111,6 +120,11 @@ class SettingsScreen extends StatelessWidget {
               ),
             ),
           ),
+          if (SmsService.instance.isSupported) ...[
+            const SizedBox(height: 18),
+            _sectionLabel(colors, 'BANK SMS'),
+            _SmsImportCard(colors: colors),
+          ],
           const SizedBox(height: 18),
           _sectionLabel(colors, 'ABOUT'),
           AppCard(
@@ -332,6 +346,93 @@ class _DailyRemindersCardState extends State<_DailyRemindersCard> {
             activeColor: const Color(0xFF3DEBA8),
             activeTrackColor: const Color(0xFF3DEBA8).withValues(alpha: 0.5),
             onChanged: onToggle,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Opt-in toggle for auto-importing bank debit/credit SMS (Android only).
+class _SmsImportCard extends StatefulWidget {
+  const _SmsImportCard({required this.colors});
+  final Palette colors;
+
+  @override
+  State<_SmsImportCard> createState() => _SmsImportCardState();
+}
+
+class _SmsImportCardState extends State<_SmsImportCard> {
+  bool _enabled = false;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    SmsService.instance.isEnabled().then((v) {
+      if (mounted) setState(() => _enabled = v);
+    });
+  }
+
+  Future<void> _toggle(bool v) async {
+    setState(() => _busy = true);
+    final app = context.read<AppState>();
+    final effective = await SmsService.instance.setEnabled(v, app);
+    if (!mounted) return;
+    setState(() {
+      _enabled = effective;
+      _busy = false;
+    });
+    if (v && !effective) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('SMS permission denied — auto-import stays off')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = widget.colors;
+    return AppCard(
+      colors: colors,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.sms_outlined, size: 20, color: colors.sub),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text('Auto-import bank SMS',
+                    style: sans(
+                        size: 14.5,
+                        weight: FontWeight.w600,
+                        color: colors.text)),
+              ),
+              const SizedBox(width: 8),
+              if (_busy)
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2.2, color: Color(0xFF3DEBA8)),
+                )
+              else
+                Switch(
+                  value: _enabled,
+                  activeColor: const Color(0xFF3DEBA8),
+                  activeTrackColor:
+                      const Color(0xFF3DEBA8).withValues(alpha: 0.5),
+                  onChanged: _toggle,
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Reads incoming bank messages and posts matching debit/credit '
+            'texts to the account whose card/account tail they mention. Set '
+            'those tails on each account (tap an account to edit). Messages '
+            'that don\'t clearly match are ignored.',
+            style: sans(size: 12, color: colors.sub),
           ),
         ],
       ),

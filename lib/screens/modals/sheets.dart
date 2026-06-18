@@ -649,29 +649,54 @@ class _AddTransactionSheetState extends State<_AddTransactionSheet> {
 // ════════════════════════════════════════════════════════════════════════
 // Add account
 // ════════════════════════════════════════════════════════════════════════
-void showAddAccountSheet(BuildContext context) {
-  _showWithState(context, const _AddAccountSheet());
+void showAddAccountSheet(BuildContext context, {Account? edit}) {
+  _showWithState(context, _AddAccountSheet(edit: edit));
 }
 
 class _AddAccountSheet extends StatefulWidget {
-  const _AddAccountSheet();
+  const _AddAccountSheet({this.edit});
+  final Account? edit;
   @override
   State<_AddAccountSheet> createState() => _AddAccountSheetState();
 }
 
 class _AddAccountSheetState extends State<_AddAccountSheet> {
-  final _name = TextEditingController();
-  final _balance = TextEditingController();
-  String _type = 'bank';
-  Color _color = kAccountColors.first;
+  late final TextEditingController _name;
+  late final TextEditingController _balance;
+  late final TextEditingController _smsIds;
+  late String _type;
+  late Color _color;
   bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.edit;
+    _name = TextEditingController(text: e?.name ?? '');
+    _balance = TextEditingController(
+        text: e != null
+            ? (e.openingBalance == e.openingBalance.roundToDouble()
+                ? e.openingBalance.toStringAsFixed(0)
+                : e.openingBalance.toString())
+            : '');
+    _smsIds = TextEditingController(text: e?.smsIds.join(', ') ?? '');
+    _type = e?.type ?? 'bank';
+    _color = e != null ? colorFromHex(e.colorHex) : kAccountColors.first;
+  }
 
   @override
   void dispose() {
     _name.dispose();
     _balance.dispose();
+    _smsIds.dispose();
     super.dispose();
   }
+
+  List<String> _parseSmsIds() => _smsIds.text
+      .split(',')
+      .map((s) => s.replaceAll(RegExp(r'\D'), '').trim())
+      .where((s) => s.isNotEmpty)
+      .toList();
 
   Future<void> _save(AppState app) async {
     if (_name.text.trim().isEmpty) {
@@ -680,14 +705,21 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
       return;
     }
     setState(() => _saving = true);
+    final e = widget.edit;
+    final account = Account(
+      id: e?.id ?? '',
+      name: _name.text.trim(),
+      type: _type,
+      colorHex: _color.toHex(),
+      openingBalance: double.tryParse(_balance.text.trim()) ?? 0,
+      smsIds: _parseSmsIds(),
+    );
     try {
-      await app.addAccount(Account(
-        id: '',
-        name: _name.text.trim(),
-        type: _type,
-        colorHex: _color.toHex(),
-        openingBalance: double.tryParse(_balance.text.trim()) ?? 0,
-      ));
+      if (e != null) {
+        await app.updateAccount(account);
+      } else {
+        await app.addAccount(account);
+      }
       if (mounted) Navigator.of(context).pop();
     } catch (_) {
       if (mounted) {
@@ -704,7 +736,7 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
     final app = context.read<AppState>();
 
     return SheetScaffold(
-      title: 'Add Account',
+      title: widget.edit != null ? 'Edit Account' : 'Add Account',
       colors: colors,
       children: [
         AppTextField(
@@ -785,9 +817,23 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
               ),
           ],
         ),
+        const SizedBox(height: 14),
+        AppTextField(
+          colors: colors,
+          controller: _smsIds,
+          label: 'SMS card / account tails (Android auto-import)',
+          hint: 'e.g. 6709, 7669',
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Last digits the bank shows in its SMS (e.g. "AC **6709" or '
+          '"card ending #7669"). Matching debit/credit texts post here '
+          'automatically. Leave blank to disable.',
+          style: sans(size: 11.5, color: colors.sub),
+        ),
         const SizedBox(height: 22),
         PrimaryButton(
-          label: 'Add Account',
+          label: widget.edit != null ? 'Save Account' : 'Add Account',
           color: _color,
           busy: _saving,
           onPressed: () => _save(app),

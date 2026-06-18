@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../services/messaging_service.dart';
 import '../services/notification_service.dart';
+import '../services/sms_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_text.dart';
 import '../theme/palette.dart';
@@ -31,17 +32,35 @@ class _HomeShellState extends State<HomeShell> {
   AppScreen _screen = AppScreen.dashboard;
   late String _month = monthKeyOf(DateTime.now());
 
+  late final AppState _appState;
+  bool _smsStarted = false;
+
   @override
   void initState() {
     super.initState();
     // Runs once per signed-in session (HomeShell is keyed by uid). Ask for
-    // notification permission, then re-arm the daily reminders from saved prefs.
-    final uid = context.read<AppState>().uid;
+    // notification permission, re-arm daily reminders, subscribe to broadcasts.
+    _appState = context.read<AppState>();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await NotificationService.instance.requestPermissions();
       await NotificationService.instance.rearmDailyReminders();
-      await MessagingService.instance.subscribeUser(uid);
+      await MessagingService.instance.subscribeUser(_appState.uid);
     });
+    // SMS auto-import needs accounts loaded to map tails — wait for first load.
+    _appState.addListener(_maybeStartSms);
+    _maybeStartSms();
+  }
+
+  void _maybeStartSms() {
+    if (_smsStarted || _appState.isLoading) return;
+    _smsStarted = true;
+    SmsService.instance.startIfEnabled(_appState);
+  }
+
+  @override
+  void dispose() {
+    _appState.removeListener(_maybeStartSms);
+    super.dispose();
   }
 
   static const _titles = {

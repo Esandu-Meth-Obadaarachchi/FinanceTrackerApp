@@ -28,7 +28,7 @@ android {
     defaultConfig {
         applicationId = "com.example.financialtracker"
         // Firebase Auth / Firestore require a minimum SDK of 23.
-        minSdk = 23
+        minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
