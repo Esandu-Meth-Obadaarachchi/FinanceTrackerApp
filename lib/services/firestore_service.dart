@@ -53,12 +53,10 @@ class FirestoreService {
       .map((s) =>
           s.docs.map((d) => RecurringRule.fromMap(d.id, d.data())).toList());
 
-  /// All budget plans (one doc per month). Small collection, read unordered;
-  /// AppState keys them by month.
-  Stream<List<BudgetPlan>> budgetsStream() => _budgets
-      .snapshots()
-      .map((s) =>
-          s.docs.map((d) => BudgetPlan.fromMap(d.id, d.data())).toList());
+  /// The single per-user budget plan (doc `budgets/current`), or null if none
+  /// has been created yet. Its `month` field records which month it belongs to.
+  Stream<BudgetPlan?> budgetStream() => _budgets.doc('current').snapshots().map(
+      (d) => d.exists ? BudgetPlan.fromMap(d.id, d.data() ?? const {}) : null);
 
   Stream<List<Reminder>> remindersStream() => _reminders
       .orderBy('dueDate')
@@ -102,12 +100,12 @@ class FirestoreService {
 
   Future<void> deleteRecurring(String id) => _recurring.doc(id).delete();
 
-  // ── Budget plans ─────────────────────────────────────────────────────────
-  // Upsert keyed by month. `createdAt` doubles as last-updated here since the
-  // doc is rewritten on each save (merge keeps any future extra fields).
-  Future<void> setBudget(BudgetPlan b) => _budgets.doc(b.month).set(
+  // ── Budget plan ──────────────────────────────────────────────────────────
+  // One plan per user at `budgets/current`. Full overwrite (no merge) so
+  // removed allocations and line items are actually dropped. `createdAt`
+  // doubles as last-updated.
+  Future<void> setBudget(BudgetPlan b) => _budgets.doc('current').set(
         {...b.toMap(), 'createdAt': FieldValue.serverTimestamp()},
-        SetOptions(merge: true),
       );
 
   // ── Reminders ──────────────────────────────────────────────────────────

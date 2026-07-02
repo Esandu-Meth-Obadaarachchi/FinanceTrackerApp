@@ -25,7 +25,7 @@ class AppState extends ChangeNotifier {
   List<AppTransaction> transactions = [];
   List<Loan> loans = [];
   List<RecurringRule> recurringRules = [];
-  Map<String, BudgetPlan> budgets = {}; // keyed by month "YYYY-MM"
+  BudgetPlan? _budget; // the single saved plan for this user
   List<Reminder> reminders = [];
 
   bool _accountsReady = false;
@@ -73,8 +73,8 @@ class AppState extends ChangeNotifier {
     });
     // Budgets are independent of the 4-stream load gate — the planner handles
     // its own empty/loading state, so the rest of the app never waits on them.
-    _budgetSub = _service.budgetsStream().listen((data) {
-      budgets = {for (final b in data) b.month: b};
+    _budgetSub = _service.budgetStream().listen((data) {
+      _budget = data;
       notifyListeners();
     });
     _reminderSub = _service.remindersStream().listen((data) {
@@ -128,9 +128,10 @@ class AppState extends ChangeNotifier {
   List<AppTransaction> transactionsInMonth(String monthKey) =>
       transactions.where((t) => t.monthKey == monthKey).toList();
 
-  /// The saved plan for [month], or a blank one if none exists yet.
-  BudgetPlan budgetFor(String month) =>
-      budgets[month] ?? BudgetPlan.empty(month);
+  /// The single saved plan for this user, or a blank one (tagged with the
+  /// current month) if none exists yet.
+  BudgetPlan get budget =>
+      _budget ?? BudgetPlan.empty(monthKeyOf(DateTime.now()));
 
   /// Actual expense spend per category for [month] (category label -> total).
   Map<String, double> expenseByCategoryInMonth(String month) {
