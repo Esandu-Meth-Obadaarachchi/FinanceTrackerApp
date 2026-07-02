@@ -43,7 +43,8 @@ lib/
   data/categories.dart     — Income/Expense categories + colour map + AccountColors
   services/
     auth_service.dart      — Email/password + Google sign-in, friendly errors
-    firestore_service.dart — Per-user collections under users/{uid}/...
+    firestore_service.dart — Per-user collections under users/{uid}/...;
+                              resetAllData() batch-wipes every collection
     notification_service.dart — local notifications: init/timezone/channels,
                               permission, daily-reminder + one-off scheduling,
                               show(). Web-safe no-op, failure-tolerant
@@ -57,9 +58,9 @@ lib/
                               (accounts, transactions, loans, recurring, budgets,
                               reminders — last two outside the load gate), exposes
                               balanceOf()/totalBalance/totalLent, pastNotes(),
-                              budgetFor()/expenseByCategoryInMonth(), CRUD
-                              passthroughs, recurring materialization; syncs
-                              reminders to ReminderScheduler
+                              budget (single plan)/expenseByCategoryInMonth(),
+                              CRUD passthroughs, resetAllData(), recurring
+                              materialization; syncs reminders to ReminderScheduler
   utils/
     formatters.dart        — fmt/fmtFull/fmtDate/recentMonths — no `intl` dep.
                               `gExactValues` flag (set by ThemeController) makes
@@ -78,12 +79,14 @@ lib/
                               to planner), "To Receive", breakdown, recent
     transactions_screen.dart, accounts_screen.dart (tap account = edit),
     loans_screen.dart, tax_screen.dart
-    budget_screen.dart     — zero-based / envelope planner (openBudgetPlanner)
+    budget_screen.dart     — zero-based / envelope planner with category line
+                              items + monthly carry-over (openBudgetPlanner)
     reminders_screen.dart  — custom due-payment reminders (openReminders)
     recurring_screen.dart  — manage fixed monthly automations (openRecurringManager)
     settings_screen.dart   — display, appearance, daily reminders, payment
-                              reminders entry, bank-SMS toggle, version
-                              (openSettings re-provides AppState)
+                              reminders entry, bank-SMS toggle, version,
+                              danger-zone reset-all-data (openSettings
+                              re-provides AppState)
     modals/sheets.dart     — Type picker, Add/Edit Transaction (note autocomplete),
                              Add/Edit Account (+ smsIds), Add Loan,
                              Add/Edit Recurring, Tx detail
@@ -347,10 +350,19 @@ firebase deploy --only firestore:rules --project=fintrack-05220041
 
 ### Indexes
 [`firestore.indexes.json`](firestore.indexes.json) is empty — every stream
-sorts on a single field (`createdAt`, `date` or `dueDate`) or is unordered
-(`budgets`), so only Firestore's automatic single-field indexes are needed.
-Adding a query that filters + orders on different fields will require a
+sorts on a single field (`createdAt`, `date` or `dueDate`), reads a single doc
+(`budgets/current`), so only Firestore's automatic single-field indexes are
+needed. Adding a query that filters + orders on different fields will require a
 composite index here.
+
+### Reset all data
+[`FirestoreService.resetAllData()`](lib/services/firestore_service.dart) deletes
+every document across `accounts`, `transactions`, `loans`, `recurring`,
+`budgets` and `reminders` (batched in chunks of 400). There is **no undo**. It
+is reached from **Settings → Danger Zone → Reset all data** behind a
+confirmation dialog. After the wipe the live streams emit empty, which also
+cancels any scheduled reminder notifications via `ReminderScheduler.syncAll`.
+Local prefs (theme, daily-reminder times, SMS dedupe set) are **not** touched.
 
 ## Firebase project
 
