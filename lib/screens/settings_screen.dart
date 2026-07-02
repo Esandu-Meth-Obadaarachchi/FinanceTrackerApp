@@ -145,9 +145,85 @@ class SettingsScreen extends StatelessWidget {
               ],
             ),
           ),
+          const SizedBox(height: 18),
+          _sectionLabel(colors, 'DANGER ZONE'),
+          InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => _confirmReset(context),
+            child: AppCard(
+              colors: colors,
+              child: Row(
+                children: [
+                  const Icon(Icons.delete_forever_outlined,
+                      size: 20, color: Color(0xFFFF5C7A)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Reset all data',
+                            style: sans(
+                                size: 14.5,
+                                weight: FontWeight.w600,
+                                color: const Color(0xFFFF5C7A))),
+                        const SizedBox(height: 2),
+                        Text(
+                            'Delete every account, transaction, loan, budget '
+                            'and reminder. Cannot be undone.',
+                            style: sans(size: 12, color: colors.sub)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  /// Confirms then wipes all of the signed-in user's data.
+  Future<void> _confirmReset(BuildContext context) async {
+    final colors = context.read<ThemeController>().colors;
+    final app = context.read<AppState>();
+    final messenger = ScaffoldMessenger.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: colors.card,
+        title: Text('Reset all data?',
+            style: sans(size: 17, weight: FontWeight.w700, color: colors.text)),
+        content: Text(
+            'This permanently deletes every account, transaction, loan, '
+            'recurring rule, budget and reminder. You will start completely '
+            'fresh. This cannot be undone.',
+            style: sans(size: 13.5, color: colors.sub)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text('Cancel', style: sans(size: 14, color: colors.sub)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text('Delete everything',
+                style: sans(
+                    size: 14,
+                    weight: FontWeight.w700,
+                    color: const Color(0xFFFF5C7A))),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await app.resetAllData();
+      messenger.showSnackBar(
+          const SnackBar(content: Text('All data cleared. Starting fresh.')));
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(
+          content: Text('Could not reset — check your connection')));
+    }
   }
 
   /// A representative figure so the user sees exactly what each mode looks like.
