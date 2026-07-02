@@ -196,6 +196,11 @@ class AppState extends ChangeNotifier {
     await _service.deleteReminder(r.id);
   }
 
+  // ── Reset ──────────────────────────────────────────────────────────────
+  /// Wipes every document in this user's tree. The live streams then emit
+  /// empty, which also clears scheduled reminder notifications via syncAll.
+  Future<void> resetAllData() => _service.resetAllData();
+
   // ── Recurring materialization ──────────────────────────────────────────
   // Generates the real transactions a rule is due for, one per month from its
   // start month up to the current calendar month (backfilling any gaps).
