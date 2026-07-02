@@ -118,4 +118,37 @@ class FirestoreService {
       _reminders.doc(r.id).update(r.toMap());
 
   Future<void> deleteReminder(String id) => _reminders.doc(id).delete();
+
+  // ── Reset ──────────────────────────────────────────────────────────────
+  /// Permanently deletes every document in the user's tree — accounts,
+  /// transactions, loans, recurring rules, budgets and reminders. There is no
+  /// undo. Batched in chunks to stay within Firestore's per-batch limit.
+  Future<void> resetAllData() async {
+    for (final c in [
+      _accounts,
+      _transactions,
+      _loans,
+      _recurring,
+      _budgets,
+      _reminders,
+    ]) {
+      await _deleteAllDocs(c);
+    }
+  }
+
+  Future<void> _deleteAllDocs(
+      CollectionReference<Map<String, dynamic>> c) async {
+    final snap = await c.get();
+    var batch = _db.batch();
+    var n = 0;
+    for (final d in snap.docs) {
+      batch.delete(d.reference);
+      if (++n == 400) {
+        await batch.commit();
+        batch = _db.batch();
+        n = 0;
+      }
+    }
+    if (n > 0) await batch.commit();
+  }
 }
