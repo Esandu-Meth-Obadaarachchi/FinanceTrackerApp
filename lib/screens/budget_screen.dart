@@ -14,24 +14,16 @@ import '../widgets/sheet_scaffold.dart';
 
 /// Opens the zero-based income/spending planner, re-providing [AppState] for the
 /// pushed route (it lands on the root navigator, above the AuthGate provider).
-void openBudgetPlanner(BuildContext context, {required String month}) {
+void openBudgetPlanner(BuildContext context) {
   final app = context.read<AppState>();
   Navigator.of(context).push(
     MaterialPageRoute(
       builder: (_) => ChangeNotifierProvider<AppState>.value(
         value: app,
-        child: BudgetScreen(month: month),
+        child: const BudgetScreen(),
       ),
     ),
   );
-}
-
-/// Shifts a "YYYY-MM" key by [n] months.
-String _shiftMonth(String m, int n) {
-  final p = m.split('-');
-  final y = int.tryParse(p[0]) ?? 2000;
-  final mo = int.tryParse(p.length > 1 ? p[1] : '1') ?? 1;
-  return monthKeyOf(DateTime(y, mo + n, 1));
 }
 
 /// Re-provides [AppState] for a sheet opened from within this screen.
@@ -49,22 +41,21 @@ const _expense = Color(0xFFFF5C7A);
 const _warn = Color(0xFFFFB547);
 
 class BudgetScreen extends StatefulWidget {
-  const BudgetScreen({super.key, required this.month});
-  final String month;
+  const BudgetScreen({super.key});
 
   @override
   State<BudgetScreen> createState() => _BudgetScreenState();
 }
 
 class _BudgetScreenState extends State<BudgetScreen> {
-  late String _month = widget.month;
-
   @override
   Widget build(BuildContext context) {
     final colors = context.watch<ThemeController>().colors;
     final app = context.watch<AppState>();
-    final plan = app.budgetFor(_month);
-    final spent = app.expenseByCategoryInMonth(_month);
+    final plan = app.budget;
+    final currentMonth = monthKeyOf(DateTime.now());
+    final spent = app.expenseByCategoryInMonth(plan.month);
+    final showCarry = !plan.isEmpty && plan.month != currentMonth;
 
     return Scaffold(
       backgroundColor: colors.bg,
@@ -83,8 +74,10 @@ class _BudgetScreenState extends State<BudgetScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 40),
         children: [
-          _monthStepper(colors),
+          _monthHeader(colors, plan.month),
           const SizedBox(height: 14),
+          if (showCarry)
+            _carryBanner(context, colors, app, plan, currentMonth),
           _summaryCard(context, colors, plan),
           const SizedBox(height: 16),
           if (plan.isEmpty)
@@ -118,33 +111,81 @@ class _BudgetScreenState extends State<BudgetScreen> {
     return cats;
   }
 
-  // ── Month stepper ──────────────────────────────────────────────────────
-  Widget _monthStepper(Palette colors) {
+  // ── Month header ───────────────────────────────────────────────────────
+  Widget _monthHeader(Palette colors, String month) {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        _stepBtn(colors, Icons.chevron_left,
-            () => setState(() => _month = _shiftMonth(_month, -1))),
-        Text(fmtMonthLong(_month),
-            style: sans(size: 16, weight: FontWeight.w700, color: colors.text)),
-        _stepBtn(colors, Icons.chevron_right,
-            () => setState(() => _month = _shiftMonth(_month, 1))),
+        Icon(Icons.calendar_today, size: 15, color: colors.sub),
+        const SizedBox(width: 8),
+        Text('Plan for ${fmtMonthLong(month)}',
+            style: sans(size: 15, weight: FontWeight.w700, color: colors.text)),
       ],
     );
   }
 
-  Widget _stepBtn(Palette colors, IconData icon, VoidCallback onTap) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(10),
+  // ── Carry-over banner (shown when the plan is from a past month) ─────────
+  Widget _carryBanner(BuildContext context, Palette colors, AppState app,
+      BudgetPlan plan, String currentMonth) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: _warn.withValues(alpha: 0.10),
+        border: Border.all(color: _warn.withValues(alpha: 0.4)),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.event_repeat, size: 18, color: _warn),
+              const SizedBox(width: 8),
+              Text("It's a new month",
+                  style: sans(
+                      size: 13.5, weight: FontWeight.w700, color: colors.text)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Your plan is from ${fmtMonthLong(plan.month)}. Bring it into '
+            '${fmtMonthLong(currentMonth)} to reuse it, or start fresh.',
+            style: sans(size: 12.5, color: colors.sub),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _bannerBtn(colors, 'Bring it over', _income,
+                    () => app.setBudget(plan.copyWith(month: currentMonth))),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _bannerBtn(colors, 'Start fresh', colors.sub,
+                    () => app.setBudget(BudgetPlan.empty(currentMonth))),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _bannerBtn(
+      Palette colors, String label, Color color, VoidCallback onTap) {
+    return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(6),
+        padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: colors.card,
-          border: Border.all(color: colors.border),
+          border: Border.all(color: color.withValues(alpha: 0.6)),
           borderRadius: BorderRadius.circular(10),
         ),
-        child: Icon(icon, size: 22, color: colors.sub),
+        child: Center(
+          child: Text(label,
+              style: sans(size: 13, weight: FontWeight.w700, color: color)),
+        ),
       ),
     );
   }
@@ -170,7 +211,7 @@ class _BudgetScreenState extends State<BudgetScreen> {
                   style: sans(size: 13, color: colors.sub)),
               InkWell(
                 onTap: () => _openSheet(
-                    context, _IncomeEditorSheet(month: _month)),
+                    context, const _IncomeEditorSheet()),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   child: Text('Edit',
@@ -251,7 +292,7 @@ class _BudgetScreenState extends State<BudgetScreen> {
             label: 'Set planned income',
             icon: Icons.account_balance_wallet_outlined,
             onPressed: () =>
-                _openSheet(context, _IncomeEditorSheet(month: _month)),
+                _openSheet(context, const _IncomeEditorSheet()),
           ),
           if (hasRecurring) ...[
             const SizedBox(height: 10),
@@ -306,7 +347,7 @@ class _BudgetScreenState extends State<BudgetScreen> {
 
     return InkWell(
       onTap: () => _openSheet(
-          context, _AllocationEditorSheet(month: _month, category: cat)),
+          context, _AllocationEditorSheet(category: cat)),
       borderRadius: BorderRadius.circular(14),
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
@@ -386,7 +427,7 @@ class _BudgetScreenState extends State<BudgetScreen> {
   Widget _addAllocationButton(BuildContext context, Palette colors) {
     return GestureDetector(
       onTap: () =>
-          _openSheet(context, _AllocationEditorSheet(month: _month)),
+          _openSheet(context, const _AllocationEditorSheet()),
       child: Container(
         margin: const EdgeInsets.only(top: 4, bottom: 8),
         padding: const EdgeInsets.symmetric(vertical: 14),
@@ -423,7 +464,7 @@ class _BudgetScreenState extends State<BudgetScreen> {
       for (final e in extras)
         InkWell(
           onTap: () => _openSheet(context,
-              _AllocationEditorSheet(month: _month, category: e.key)),
+              _AllocationEditorSheet(category: e.key)),
           borderRadius: BorderRadius.circular(14),
           child: Container(
             margin: const EdgeInsets.only(bottom: 10),
@@ -470,8 +511,7 @@ class _BudgetScreenState extends State<BudgetScreen> {
 // Planned income editor
 // ════════════════════════════════════════════════════════════════════════
 class _IncomeEditorSheet extends StatefulWidget {
-  const _IncomeEditorSheet({required this.month});
-  final String month;
+  const _IncomeEditorSheet();
 
   @override
   State<_IncomeEditorSheet> createState() => _IncomeEditorSheetState();
@@ -483,8 +523,7 @@ class _IncomeEditorSheetState extends State<_IncomeEditorSheet> {
   @override
   void initState() {
     super.initState();
-    final app = context.read<AppState>();
-    final cur = app.budgetFor(widget.month).plannedIncome;
+    final cur = context.read<AppState>().budget.plannedIncome;
     _amount = TextEditingController(text: cur > 0 ? _trim(cur) : '');
   }
 
@@ -502,7 +541,7 @@ class _IncomeEditorSheetState extends State<_IncomeEditorSheet> {
     final colors = context.read<ThemeController>().colors;
     final app = context.read<AppState>();
     return SheetScaffold(
-      title: 'Planned income · ${fmtMonthLong(widget.month)}',
+      title: 'Planned income · ${fmtMonthLong(app.budget.month)}',
       colors: colors,
       children: [
         AppTextField(
@@ -518,8 +557,7 @@ class _IncomeEditorSheetState extends State<_IncomeEditorSheet> {
           label: 'Save',
           onPressed: () {
             final amt = double.tryParse(_amount.text.trim()) ?? 0;
-            final plan = app.budgetFor(widget.month);
-            app.setBudget(plan.copyWith(plannedIncome: amt));
+            app.setBudget(app.budget.copyWith(plannedIncome: amt));
             Navigator.of(context).pop();
           },
         ),
@@ -532,8 +570,7 @@ class _IncomeEditorSheetState extends State<_IncomeEditorSheet> {
 // Allocation editor (add or edit a category envelope)
 // ════════════════════════════════════════════════════════════════════════
 class _AllocationEditorSheet extends StatefulWidget {
-  const _AllocationEditorSheet({required this.month, this.category});
-  final String month;
+  const _AllocationEditorSheet({this.category});
   final String? category; // null => add new
 
   @override
@@ -562,7 +599,7 @@ class _AllocationEditorSheetState extends State<_AllocationEditorSheet> {
   @override
   void initState() {
     super.initState();
-    final plan = context.read<AppState>().budgetFor(widget.month);
+    final plan = context.read<AppState>().budget;
     _category = widget.category ?? _firstUnallocated(plan);
     _seedRows(plan);
   }
@@ -615,9 +652,9 @@ class _AllocationEditorSheetState extends State<_AllocationEditorSheet> {
   Widget build(BuildContext context) {
     final colors = context.read<ThemeController>().colors;
     final app = context.read<AppState>();
-    final plan = app.budgetFor(widget.month);
+    final plan = app.budget;
     final isEdit = widget.category != null;
-    final spent = app.expenseByCategoryInMonth(widget.month)[_category] ?? 0;
+    final spent = app.expenseByCategoryInMonth(plan.month)[_category] ?? 0;
     final multi = _rows.length > 1;
 
     return SheetScaffold(

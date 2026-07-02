@@ -225,7 +225,7 @@ users/{uid}                       — implicit parent; no fields of its own
   ├─ transactions/{txId}
   ├─ loans/{loanId}
   ├─ recurring/{ruleId}
-  ├─ budgets/{monthKey}            — one doc per month, id = "YYYY-MM"
+  ├─ budgets/current              — the single per-user zero-based plan
   └─ reminders/{reminderId}
 ```
 `uid` is the FirebaseAuth user id. All collections are read live as streams in
@@ -300,17 +300,25 @@ transaction document is created.
 
 See "Recurring transactions are materialized client-side" below.
 
-**budgets/{monthKey}** — zero-based / envelope plan, one per month ([budget_plan.dart](lib/models/budget_plan.dart))
+**budgets/current** — the one zero-based / envelope plan per user ([budget_plan.dart](lib/models/budget_plan.dart))
+
+There is a **single** budget doc per user, always at id `current` (not one per
+month). Its `month` field records which month the plan currently belongs to.
 
 | field | type | notes |
 |---|---|---|
-| `month` | string | `YYYY-MM` (also the doc id) |
+| `month` | string | `YYYY-MM` the plan belongs to (a **field**, not the doc id) |
 | `plannedIncome` | number | expected income for the month |
-| `allocations` | map<string,number> | category label -> planned amount |
-| `createdAt` | timestamp | server-set; upsert so doubles as last-updated. Stream is **unordered**; AppState keys by month |
+| `allocations` | map<string,number> | category label -> planned total |
+| `items` | map<string, array<{name,amount}>> | optional line-item breakdown per category; when present, `allocations[cat]` == sum of its items |
+| `createdAt` | timestamp | server-set; full overwrite on each save so doubles as last-updated |
 
-Actual spend per category is derived from `transactions` (not stored). The
-zero-based goal is `plannedIncome - sum(allocations) == 0`.
+Saved with a full `set` (no merge) so removed allocations/items are actually
+dropped. Actual spend per category is derived from `transactions` in
+`plan.month` (not stored). The zero-based goal is
+`plannedIncome - sum(allocations) == 0`. **Carry-over**: when `plan.month`
+differs from the current month, the planner shows a banner to bring the plan
+into the new month (updates `month`, keeps allocations) or start fresh.
 
 **reminders/{reminderId}** — custom due-payment reminder ([reminder.dart](lib/models/reminder.dart))
 

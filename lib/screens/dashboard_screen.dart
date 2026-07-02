@@ -52,7 +52,7 @@ class DashboardScreen extends StatelessWidget {
         _accountsRow(context, colors, app),
         const SizedBox(height: 16),
         GestureDetector(
-          onTap: () => openBudgetPlanner(context, month: month),
+          onTap: () => openBudgetPlanner(context),
           child: _budgetCard(colors, income, expenses, pending),
         ),
         if (lent > 0 || pending > 0) ...[

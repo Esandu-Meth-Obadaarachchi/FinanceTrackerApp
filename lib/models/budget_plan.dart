@@ -90,12 +90,13 @@ class BudgetPlan {
   List<BudgetItem> itemsFor(String category) => items[category] ?? const [];
 
   BudgetPlan copyWith({
+    String? month,
     double? plannedIncome,
     Map<String, double>? allocations,
     Map<String, List<BudgetItem>>? items,
   }) =>
       BudgetPlan(
-        month: month,
+        month: month ?? this.month,
         plannedIncome: plannedIncome ?? this.plannedIncome,
         allocations: allocations ?? this.allocations,
         items: items ?? this.items,
