@@ -426,6 +426,20 @@ picking up iOS: run `flutterfire configure --platforms=ios
 --project=fintrack-05220041`, register the iOS bundle in Firebase Auth,
 and add `GoogleService-Info.plist` reverse client ID for Google Sign-In.
 
+## Git workflow
+
+- **Never commit straight to `main`.** Every new feature or fix starts on its
+  own branch off `main` — `feature/<short-name>` for new work,
+  `fix/<short-name>` for bug fixes, `docs/<short-name>` for documentation.
+- **Commit at the end of each subtask**, not once at the end of the whole job.
+  A branch should read as a sequence of self-contained steps.
+- Write a proper commit message: a short imperative subject line (`Add
+  responsive desktop layout`, not `changes` or `wip`), and a body explaining
+  *why* whenever the reason isn't obvious from the diff.
+- **Do not add `Co-Authored-By: Claude` or any other AI attribution trailer**
+  to commit messages.
+- Run `flutter analyze` before each commit and keep it clean.
+
 ## House rules
 
 - Don't reach for `intl` — the formatters in [utils/formatters.dart](lib/utils/formatters.dart) cover everything.
