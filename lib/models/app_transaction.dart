@@ -10,6 +10,7 @@ class AppTransaction {
   final double amount;
   final String status; // received | pending  (income only; else 'received')
   final String? recurringId; // set when auto-generated from a RecurringRule
+  final String? loanId; // set when this entry settles part of a Loan
 
   const AppTransaction({
     required this.id,
@@ -22,6 +23,7 @@ class AppTransaction {
     required this.amount,
     required this.status,
     this.recurringId,
+    this.loanId,
   });
 
   factory AppTransaction.fromMap(String id, Map<String, dynamic> m) =>
@@ -36,6 +38,7 @@ class AppTransaction {
         amount: (m['amount'] as num?)?.toDouble() ?? 0,
         status: (m['status'] ?? 'received') as String,
         recurringId: m['recurringId'] as String?,
+        loanId: m['loanId'] as String?,
       );
 
   Map<String, dynamic> toMap() => {
@@ -48,6 +51,7 @@ class AppTransaction {
         'amount': amount,
         'status': status,
         'recurringId': recurringId,
+        'loanId': loanId,
       };
 
   bool get isIncome => type == 'income';
@@ -55,6 +59,7 @@ class AppTransaction {
   bool get isTransfer => type == 'transfer';
   bool get isPending => status == 'pending';
   bool get isRecurring => recurringId != null && recurringId!.isNotEmpty;
+  bool get isLoanPayment => loanId != null && loanId!.isNotEmpty;
 
   DateTime get dateTime => DateTime.tryParse(date) ?? DateTime(2000);
   String get monthKey => date.length >= 7 ? date.substring(0, 7) : date;

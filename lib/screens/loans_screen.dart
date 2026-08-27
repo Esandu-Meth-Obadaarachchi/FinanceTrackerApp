@@ -248,7 +248,7 @@ class _LoansScreenState extends State<LoansScreen> {
                 if (loan.isPending)
                   Expanded(
                     child: GestureDetector(
-                      onTap: () => app.markLoanRepaid(loan.id),
+                      onTap: () => app.markLoanRepaid(loan),
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         decoration: BoxDecoration(

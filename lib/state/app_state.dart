@@ -6,6 +6,7 @@ import '../models/account.dart';
 import '../models/app_transaction.dart';
 import '../models/budget_plan.dart';
 import '../models/loan.dart';
+import '../models/loan_math.dart';
 import '../models/recurring_rule.dart';
 import '../models/reminder.dart';
 import '../services/firestore_service.dart';
@@ -88,35 +89,34 @@ class AppState extends ChangeNotifier {
   // ── Derived data ───────────────────────────────────────────────────────
 
   /// Current balance = opening balance + effect of every transaction,
-  /// minus any money currently lent out from this account.
-  double balanceOf(Account a) {
-    double b = a.openingBalance;
-    for (final t in transactions) {
-      if (t.isIncome && t.status == 'received' && t.accountId == a.id) {
-        b += t.amount;
-      } else if (t.isExpense && t.accountId == a.id) {
-        b -= t.amount;
-      } else if (t.isTransfer) {
-        if (t.accountId == a.id) b -= t.amount;
-        if (t.toAccountId == a.id) b += t.amount;
-      }
-    }
-    // Money lent out (and not yet repaid) has left the account.
-    for (final l in loans) {
-      if (l.isLent && l.isPending && l.accountId == a.id) {
-        b -= l.amount;
-      }
-    }
-    return b;
-  }
+  /// minus any money lent out of this account. See [accountBalance].
+  double balanceOf(Account a) => accountBalance(a, transactions, loans);
 
   double get totalBalance =>
       accounts.fold(0.0, (sum, a) => sum + balanceOf(a));
 
-  /// Outstanding money lent to others (pending repayment) — to be collected.
+  /// Outstanding money lent to others — what is still to be collected.
   double get totalLent => loans
       .where((l) => l.isLent && l.isPending)
-      .fold(0.0, (sum, l) => sum + l.amount);
+      .fold(0.0, (sum, l) => sum + outstandingOf(l));
+
+  /// Outstanding money owed to others on borrowed loans.
+  double get totalBorrowed => loans
+      .where((l) => !l.isLent && l.isPending)
+      .fold(0.0, (sum, l) => sum + outstandingOf(l));
+
+  // ── Loan settlement ────────────────────────────────────────────────────
+
+  /// Every transaction recorded against [loanId]. `transactions` is ordered
+  /// by date descending, so this is newest first.
+  List<AppTransaction> paymentsOf(String loanId) =>
+      loanPayments(transactions, loanId).toList();
+
+  /// How much of [l] has been settled so far.
+  double repaidOf(Loan l) => loanRepaid(l, transactions);
+
+  /// What is still to be settled on [l]; never negative.
+  double outstandingOf(Loan l) => loanOutstanding(l, transactions);
 
   Account? accountById(String id) {
     for (final a in accounts) {
@@ -174,9 +174,55 @@ class AppState extends ChangeNotifier {
 
   // ── Loan operations ────────────────────────────────────────────────────
   Future<void> addLoan(Loan l) => _service.addLoan(l);
-  Future<void> markLoanRepaid(String id) =>
-      _service.updateLoan(id, {'status': 'repaid'});
   Future<void> deleteLoan(String id) => _service.deleteLoan(id);
+
+  /// Record a full or partial settlement of [l].
+  ///
+  /// Money coming back on a lent loan is income; money going out to clear a
+  /// borrowed one is an expense. Either way the entry is tagged with the loan
+  /// id, which is what [repaidOf] counts — so the loan's outstanding figure
+  /// and the month's income/expense totals stay in step automatically.
+  ///
+  /// The loan flips to `repaid` once nothing is left outstanding.
+  Future<void> recordLoanPayment(
+    Loan l, {
+    required double amount,
+    required String accountId,
+    required String date,
+    String note = '',
+  }) async {
+    if (amount <= 0) return;
+    final capped = amount.clamp(0, outstandingOf(l)).toDouble();
+    if (capped <= 0) return;
+
+    await _service.addTransaction(AppTransaction(
+      id: '',
+      date: date,
+      type: l.isLent ? 'income' : 'expense',
+      accountId: accountId,
+      category: l.isLent ? 'Loan Received' : 'Loan Repayment',
+      note: note.trim().isEmpty
+          ? '${l.isLent ? 'Repayment from' : 'Repayment to'} ${l.who}'
+          : note.trim(),
+      amount: capped,
+      status: 'received',
+      loanId: l.id,
+    ));
+
+    // Settled in full once this payment lands.
+    if (capped >= outstandingOf(l) - 0.005) {
+      await _service.updateLoan(l.id, {'status': 'repaid'});
+    }
+  }
+
+  /// Settle whatever is left on [l] in one go.
+  Future<void> markLoanRepaid(Loan l, {String? accountId, String? date}) =>
+      recordLoanPayment(
+        l,
+        amount: outstandingOf(l),
+        accountId: accountId ?? l.accountId,
+        date: date ?? dateKeyOf(DateTime.now()),
+      );
 
   // ── Recurring rule operations ──────────────────────────────────────────
   Future<void> addRecurring(RecurringRule r) => _service.addRecurring(r);
