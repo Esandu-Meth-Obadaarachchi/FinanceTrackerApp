@@ -11,6 +11,7 @@ class AppTransaction {
   final String status; // received | pending  (income only; else 'received')
   final String? recurringId; // set when auto-generated from a RecurringRule
   final String? loanId; // set when this entry settles part of a Loan
+  final String? parentId; // set when this entry is part of a pending income
 
   const AppTransaction({
     required this.id,
@@ -24,6 +25,7 @@ class AppTransaction {
     required this.status,
     this.recurringId,
     this.loanId,
+    this.parentId,
   });
 
   factory AppTransaction.fromMap(String id, Map<String, dynamic> m) =>
@@ -39,6 +41,7 @@ class AppTransaction {
         status: (m['status'] ?? 'received') as String,
         recurringId: m['recurringId'] as String?,
         loanId: m['loanId'] as String?,
+        parentId: m['parentId'] as String?,
       );
 
   Map<String, dynamic> toMap() => {
@@ -52,7 +55,29 @@ class AppTransaction {
         'status': status,
         'recurringId': recurringId,
         'loanId': loanId,
+        'parentId': parentId,
       };
+
+  AppTransaction copyWith({
+    String? accountId,
+    double? amount,
+    String? status,
+    String? parentId,
+  }) =>
+      AppTransaction(
+        id: id,
+        date: date,
+        type: type,
+        accountId: accountId ?? this.accountId,
+        toAccountId: toAccountId,
+        category: category,
+        note: note,
+        amount: amount ?? this.amount,
+        status: status ?? this.status,
+        recurringId: recurringId,
+        loanId: loanId,
+        parentId: parentId ?? this.parentId,
+      );
 
   bool get isIncome => type == 'income';
   bool get isExpense => type == 'expense';
