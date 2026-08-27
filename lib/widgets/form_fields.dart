@@ -470,3 +470,178 @@ class PrimaryButton extends StatelessWidget {
 
 /// Number-only text input formatter allowing one decimal point.
 final amountFormatter = FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'));
+
+/// A large editable amount backed by a slider and percentage quick picks,
+/// capped at [max]. Used wherever part of an outstanding balance is settled —
+/// a loan payment, receiving part of a pending income.
+///
+/// Owns the value so the slider and the text field cannot fight over it, and
+/// reports every change through [onChanged].
+class AmountSlider extends StatefulWidget {
+  const AmountSlider({
+    super.key,
+    required this.colors,
+    required this.tone,
+    required this.max,
+    required this.onChanged,
+    this.label = 'AMOUNT (LKR)',
+  });
+
+  final Palette colors;
+  final Color tone;
+
+  /// Upper bound — what is still outstanding. The value starts here.
+  final double max;
+  final ValueChanged<double> onChanged;
+  final String label;
+
+  @override
+  State<AmountSlider> createState() => _AmountSliderState();
+}
+
+class _AmountSliderState extends State<AmountSlider> {
+  final _controller = TextEditingController();
+  double _value = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _value = widget.max;
+    _controller.text = _plain(_value);
+  }
+
+  @override
+  void didUpdateWidget(AmountSlider old) {
+    super.didUpdateWidget(old);
+    // The outstanding figure can move under us (a stream update); keep the
+    // value inside the new bound without stomping on what the user typed.
+    if (widget.max != old.max && _value > widget.max) {
+      _set(widget.max);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  /// Plain digits for the editable field — no grouping, so it re-parses.
+  static String _plain(double v) =>
+      v == v.roundToDouble() ? v.round().toString() : v.toStringAsFixed(2);
+
+  void _set(double v, {bool syncText = true}) {
+    final clamped = v.clamp(0, widget.max).toDouble();
+    setState(() => _value = clamped);
+    if (syncText) _controller.text = _plain(clamped);
+    widget.onChanged(clamped);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = widget.colors;
+    final tone = widget.tone;
+
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          decoration: BoxDecoration(
+            color: colors.inputBg,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            children: [
+              Text(widget.label,
+                  style: sans(
+                      size: 12,
+                      weight: FontWeight.w600,
+                      color: colors.sub,
+                      letterSpacing: 0.6)),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text('Rs ', style: mono(size: 22, color: colors.sub)),
+                  IntrinsicWidth(
+                    child: TextField(
+                      controller: _controller,
+                      textAlign: TextAlign.center,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [amountFormatter],
+                      style:
+                          mono(size: 36, weight: FontWeight.w700, color: tone),
+                      cursorColor: tone,
+                      // Typed edits move the slider but leave the field alone,
+                      // so the caret stays where the user put it.
+                      onChanged: (raw) => _set(
+                          double.tryParse(raw.trim()) ?? 0,
+                          syncText: false),
+                      decoration: InputDecoration(
+                        isCollapsed: true,
+                        border: InputBorder.none,
+                        hintText: '0',
+                        hintStyle: mono(
+                            size: 36,
+                            weight: FontWeight.w700,
+                            color: colors.muted),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 6),
+        if (widget.max > 0)
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              activeTrackColor: tone,
+              inactiveTrackColor: colors.elevated,
+              thumbColor: tone,
+              overlayColor: tone.withValues(alpha: 0.14),
+              trackHeight: 5,
+            ),
+            child: Slider(
+              value: _value.clamp(0, widget.max).toDouble(),
+              max: widget.max,
+              onChanged: (v) => _set(v.roundToDouble()),
+            ),
+          ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            for (final (label, fraction) in const [
+              ('25%', 0.25),
+              ('50%', 0.5),
+              ('75%', 0.75),
+              ('All', 1.0),
+            ])
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => _set((widget.max * fraction).roundToDouble()),
+                  child: Container(
+                    margin: EdgeInsets.only(right: fraction == 1.0 ? 0 : 8),
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    decoration: BoxDecoration(
+                      color: tone.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Center(
+                      child: Text(label,
+                          style: sans(
+                              size: 12.5,
+                              weight: FontWeight.w600,
+                              color: tone)),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}

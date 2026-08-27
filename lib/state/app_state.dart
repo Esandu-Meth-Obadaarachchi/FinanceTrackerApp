@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../models/account.dart';
 import '../models/app_transaction.dart';
 import '../models/budget_plan.dart';
+import '../models/income_math.dart';
 import '../models/loan.dart';
 import '../models/loan_math.dart';
 import '../models/recurring_rule.dart';
@@ -175,6 +176,50 @@ class AppState extends ChangeNotifier {
       _service.updateTransaction(t);
   Future<void> deleteTransaction(String id) =>
       _service.deleteTransaction(id);
+
+  /// Receipts recorded against a pending income, newest first.
+  List<AppTransaction> receiptsOf(String txId) =>
+      transactions.where((t) => t.parentId == txId).toList();
+
+  /// Record that [amount] of the pending income [tx] has actually arrived.
+  ///
+  /// A part payment splits the entry: a received transaction for the money in
+  /// hand, and [tx] shrunk by the same amount so it always states what is
+  /// still owed. Receiving the last of it just marks [tx] received rather
+  /// than leaving a zero-value row behind.
+  ///
+  /// Because the pending amount *is* the outstanding figure, every "pending
+  /// income" total keeps working untouched.
+  Future<void> receivePendingIncome(
+    AppTransaction tx, {
+    required double amount,
+    required String accountId,
+    required String date,
+  }) async {
+    if (!tx.isIncome || !tx.isPending) return;
+    final split = splitPendingIncome(tx.amount, amount);
+    if (split.receipt <= 0) return;
+
+    if (split.settlesFully) {
+      await _service.updateTransaction(
+          tx.copyWith(status: 'received', accountId: accountId));
+      return;
+    }
+
+    // Part paid: bank what arrived, leave the rest outstanding.
+    await _service.addTransaction(AppTransaction(
+      id: '',
+      date: date,
+      type: 'income',
+      accountId: accountId,
+      category: tx.category,
+      note: tx.note,
+      amount: split.receipt,
+      status: 'received',
+      parentId: tx.id,
+    ));
+    await _service.updateTransaction(tx.copyWith(amount: split.remaining));
+  }
 
   // ── Loan operations ────────────────────────────────────────────────────
   Future<void> addLoan(Loan l) => _service.addLoan(l);
