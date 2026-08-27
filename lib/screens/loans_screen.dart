@@ -34,12 +34,9 @@ class _LoansScreenState extends State<LoansScreen> {
       );
     }
 
-    final lentTotal = app.loans
-        .where((l) => l.isLent)
-        .fold(0.0, (s, l) => s + l.amount);
-    final borrowedTotal = app.loans
-        .where((l) => !l.isLent)
-        .fold(0.0, (s, l) => s + l.amount);
+    // Outstanding, not lifetime totals — what is actually still owed.
+    final lentTotal = app.totalLent;
+    final borrowedTotal = app.totalBorrowed;
     final filtered = app.loans.where((l) => l.loanType == _tab).toList();
 
     final wide = context.isWide;
@@ -77,11 +74,11 @@ class _LoansScreenState extends State<LoansScreen> {
                 children: [
                   Expanded(
                     child: _summaryTile(
-                        colors, 'I Lent', lentTotal, const Color(0xFF3DEBA8)),
+                        colors, 'To Receive', lentTotal, const Color(0xFF3DEBA8)),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: _summaryTile(colors, 'I Borrowed', borrowedTotal,
+                    child: _summaryTile(colors, 'To Pay Back', borrowedTotal,
                         const Color(0xFFFF5C7A)),
                   ),
                 ],
@@ -139,6 +136,44 @@ class _LoansScreenState extends State<LoansScreen> {
     );
   }
 
+  /// Settlement progress, shown once a loan has been partly paid off.
+  Widget _progress(Palette colors, Loan loan, double repaid, double outstanding,
+      Color tone) {
+    final pct = loan.amount > 0 ? (repaid / loan.amount).clamp(0.0, 1.0) : 0.0;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: pct,
+              minHeight: 6,
+              backgroundColor: colors.elevated,
+              valueColor: AlwaysStoppedAnimation(tone),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: Text('Rs ${fmt(repaid)} settled',
+                    style: sans(size: 11.5, color: colors.sub)),
+              ),
+              Text(
+                  outstanding > 0
+                      ? 'Rs ${fmt(outstanding)} left'
+                      : 'Fully settled',
+                  style: sans(
+                      size: 11.5, weight: FontWeight.w600, color: tone)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _summaryTile(
       Palette colors, String label, double value, Color color) {
     return Container(
@@ -169,6 +204,9 @@ class _LoansScreenState extends State<LoansScreen> {
     final loanColor =
         loan.isLent ? const Color(0xFF3DEBA8) : const Color(0xFFFF5C7A);
     final acc = app.accountById(loan.accountId);
+    final repaid = app.repaidOf(loan);
+    final outstanding = app.outstandingOf(loan);
+    final settled = app.isSettled(loan);
 
     return Container(
       decoration: BoxDecoration(
@@ -232,12 +270,13 @@ class _LoansScreenState extends State<LoansScreen> {
                             weight: FontWeight.w700,
                             color: loanColor)),
                     const SizedBox(height: 2),
-                    StatusChip(status: loan.status),
+                    StatusChip(status: settled ? 'repaid' : 'pending'),
                   ],
                 ),
               ],
             ),
           ),
+          if (repaid > 0) _progress(colors, loan, repaid, outstanding, loanColor),
           Container(
             decoration: BoxDecoration(
               border: Border(top: BorderSide(color: colors.border)),
@@ -245,28 +284,28 @@ class _LoansScreenState extends State<LoansScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Row(
               children: [
-                if (loan.isPending)
+                if (!settled)
                   Expanded(
                     child: GestureDetector(
-                      onTap: () => app.markLoanRepaid(loan.id),
+                      onTap: () => showLoanPaymentSheet(context, loan),
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF3DEBA8)
-                              .withValues(alpha: 0.13),
+                          color: loanColor.withValues(alpha: 0.13),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Center(
-                          child: Text('Mark Repaid',
+                          child: Text(
+                              loan.isLent ? 'Record Receipt' : 'Make Payment',
                               style: sans(
                                   size: 12,
                                   weight: FontWeight.w600,
-                                  color: const Color(0xFF3DEBA8))),
+                                  color: loanColor)),
                         ),
                       ),
                     ),
                   ),
-                if (loan.isPending) const SizedBox(width: 8),
+                if (!settled) const SizedBox(width: 8),
                 GestureDetector(
                   onTap: () => app.deleteLoan(loan.id),
                   child: Container(

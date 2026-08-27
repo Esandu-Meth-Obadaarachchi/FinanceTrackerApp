@@ -43,4 +43,8 @@ class Loan {
 
   bool get isLent => loanType == 'lent';
   bool get isPending => status == 'pending';
+
+  /// The label shown for settling this loan: money coming back to me for a
+  /// lent loan, money going out for a borrowed one.
+  String get settleVerb => isLent ? 'Received' : 'Paid';
 }
