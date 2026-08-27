@@ -8,6 +8,7 @@ import '../theme/palette.dart';
 import '../theme/theme_controller.dart';
 import '../utils/color_x.dart';
 import '../utils/formatters.dart';
+import '../utils/responsive.dart';
 import '../widgets/common.dart';
 import 'modals/sheets.dart';
 
@@ -26,9 +27,38 @@ class AccountsScreen extends StatelessWidget {
       );
     }
 
+    final wide = context.isWide;
+
+    // Two-up grid on desktop; each card gets half the row minus the gutter.
+    final addCard = GestureDetector(
+      onTap: () => showAddAccountSheet(context),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 15),
+        decoration: BoxDecoration(
+          border: Border.all(color: colors.border, width: 1.5),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.add, size: 18, color: colors.sub),
+            const SizedBox(width: 8),
+            Text('Add Account',
+                style: sans(
+                    size: 15, weight: FontWeight.w600, color: colors.sub)),
+          ],
+        ),
+      ),
+    );
+
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 110),
+      padding: context.pagePadding,
       children: [
+        ContentWidth(
+          maxWidth: 1000,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
         // Total card
         Container(
           width: double.infinity,
@@ -59,32 +89,33 @@ class AccountsScreen extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 16),
-        for (final acc in app.accounts) ...[
-          _accountCard(context, colors, app, acc),
-          const SizedBox(height: 16),
-        ],
-        GestureDetector(
-          onTap: () => showAddAccountSheet(context),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 15),
-            decoration: BoxDecoration(
-              border: Border.all(
-                  color: colors.border, width: 1.5),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.add, size: 18, color: colors.sub),
-                const SizedBox(width: 8),
-                Text('Add Account',
-                    style: sans(
-                        size: 15,
-                        weight: FontWeight.w600,
-                        color: colors.sub)),
+              const SizedBox(height: 20),
+              if (wide)
+                LayoutBuilder(
+                  builder: (_, c) {
+                    final cardWidth = (c.maxWidth - 20) / 2;
+                    return Wrap(
+                      spacing: 20,
+                      runSpacing: 20,
+                      children: [
+                        for (final acc in app.accounts)
+                          SizedBox(
+                            width: cardWidth,
+                            child: _accountCard(context, colors, app, acc),
+                          ),
+                        SizedBox(width: cardWidth, child: addCard),
+                      ],
+                    );
+                  },
+                )
+              else ...[
+                for (final acc in app.accounts) ...[
+                  _accountCard(context, colors, app, acc),
+                  const SizedBox(height: 16),
+                ],
+                addCard,
               ],
-            ),
+            ],
           ),
         ),
       ],

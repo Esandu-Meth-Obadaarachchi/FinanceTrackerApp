@@ -8,6 +8,7 @@ import '../theme/app_text.dart';
 import '../theme/palette.dart';
 import '../theme/theme_controller.dart';
 import '../utils/formatters.dart';
+import '../utils/responsive.dart';
 import '../widgets/common.dart';
 import '../widgets/form_fields.dart';
 import '../widgets/sheet_scaffold.dart';
@@ -72,7 +73,7 @@ class _BudgetScreenState extends State<BudgetScreen> {
         ),
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 40),
+        padding: centredInsets(context, maxWidth: 760, bottom: 40),
         children: [
           _monthHeader(colors, plan.month),
           const SizedBox(height: 14),

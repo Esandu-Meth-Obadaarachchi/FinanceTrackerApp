@@ -10,6 +10,7 @@ import '../theme/app_text.dart';
 import '../theme/palette.dart';
 import '../theme/theme_controller.dart';
 import '../utils/formatters.dart';
+import '../utils/responsive.dart';
 import '../widgets/common.dart';
 import 'reminders_screen.dart';
 
@@ -52,7 +53,7 @@ class SettingsScreen extends StatelessWidget {
         ),
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        padding: centredInsets(context, top: 16),
         children: [
           _sectionLabel(colors, 'DISPLAY'),
           AppCard(

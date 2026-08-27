@@ -7,6 +7,7 @@ import '../theme/app_text.dart';
 import '../theme/palette.dart';
 import '../theme/theme_controller.dart';
 import '../utils/formatters.dart';
+import '../utils/responsive.dart';
 import '../widgets/common.dart';
 import '../widgets/form_fields.dart';
 import '../widgets/sheet_scaffold.dart';
@@ -61,7 +62,7 @@ class RemindersScreen extends StatelessWidget {
         ),
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
+        padding: centredInsets(context),
         children: [
           Text(
             'Get notified before something is due — a bill, a card payment, '

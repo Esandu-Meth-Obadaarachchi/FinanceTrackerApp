@@ -8,6 +8,7 @@ import '../theme/app_text.dart';
 import '../theme/palette.dart';
 import '../theme/theme_controller.dart';
 import '../utils/formatters.dart';
+import '../utils/responsive.dart';
 import '../widgets/common.dart';
 import '../widgets/form_fields.dart';
 import 'modals/sheets.dart';
@@ -70,112 +71,153 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     final dates = groups.keys.toList()
       ..sort((a, b) => b.compareTo(a));
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 110),
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text('This month',
-                  style: sans(
-                      size: 13, weight: FontWeight.w700, color: colors.sub)),
-            ),
-            GestureDetector(
-              onTap: () => openRecurringManager(context),
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF3DEBA8).withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.repeat,
-                        size: 15, color: Color(0xFF3DEBA8)),
-                    const SizedBox(width: 6),
-                    Text('Recurring',
-                        style: sans(
-                            size: 12.5,
-                            weight: FontWeight.w600,
-                            color: const Color(0xFF3DEBA8))),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        SegmentedControl<String>(
-          colors: colors,
-          value: _tab,
-          options: const [
-            (value: 'all', label: 'All'),
-            (value: 'income', label: 'Income'),
-            (value: 'expense', label: 'Expenses'),
-            (value: 'transfer', label: 'Transfers'),
-          ],
-          onChanged: (v) => setState(() => _tab = v),
-        ),
-        const SizedBox(height: 14),
-        Row(
-          children: [
-            Expanded(
-              child: _summaryTile(colors, 'Income', income,
-                  const Color(0xFF3DEBA8)),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _summaryTile(colors, 'Expenses', expenses,
-                  const Color(0xFFFF5C7A)),
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        SearchField(
-          colors: colors,
-          controller: _searchController,
-          hint: 'Search transactions…',
-          onChanged: (v) => setState(() => _search = v),
-        ),
-        const SizedBox(height: 14),
-        if (dates.isEmpty)
-          EmptyState(
-            icon: Icons.receipt_long_outlined,
-            title: 'No transactions',
-            subtitle: 'No entries match your filter',
-            colors: colors,
-          )
-        else
-          for (final date in dates) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(2, 0, 0, 8),
-              child: Text(fmtDate(date).toUpperCase(),
-                  style: sans(
-                      size: 12,
-                      weight: FontWeight.w700,
-                      color: colors.sub,
-                      letterSpacing: 0.6)),
-            ),
-            Container(
-              margin: const EdgeInsets.only(bottom: 14),
+    final wide = context.isWide;
+
+    final controls = <Widget>[
+      Row(
+        children: [
+          Expanded(
+            child: Text('This month',
+                style: sans(
+                    size: 13, weight: FontWeight.w700, color: colors.sub)),
+          ),
+          GestureDetector(
+            onTap: () => openRecurringManager(context),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
               decoration: BoxDecoration(
-                color: colors.card,
-                border: Border.all(color: colors.border),
-                borderRadius: BorderRadius.circular(16),
+                color: const Color(0xFF3DEBA8).withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(20),
               ),
-              child: Column(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  for (int i = 0; i < groups[date]!.length; i++) ...[
-                    if (i > 0)
-                      ThinDivider(colors: colors, indent: 16),
-                    _txRow(colors, groups[date]![i], app),
-                  ],
+                  const Icon(Icons.repeat, size: 15, color: Color(0xFF3DEBA8)),
+                  const SizedBox(width: 6),
+                  Text('Recurring',
+                      style: sans(
+                          size: 12.5,
+                          weight: FontWeight.w600,
+                          color: const Color(0xFF3DEBA8))),
                 ],
               ),
             ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 12),
+      SegmentedControl<String>(
+        colors: colors,
+        value: _tab,
+        options: const [
+          (value: 'all', label: 'All'),
+          (value: 'income', label: 'Income'),
+          (value: 'expense', label: 'Expenses'),
+          (value: 'transfer', label: 'Transfers'),
+        ],
+        onChanged: (v) => setState(() => _tab = v),
+      ),
+      const SizedBox(height: 14),
+      // Side-by-side on mobile, stacked in the desktop filter column.
+      if (wide) ...[
+        _summaryTile(colors, 'Income', income, const Color(0xFF3DEBA8)),
+        const SizedBox(height: 10),
+        _summaryTile(colors, 'Expenses', expenses, const Color(0xFFFF5C7A)),
+      ] else
+        Row(
+          children: [
+            Expanded(
+              child: _summaryTile(
+                  colors, 'Income', income, const Color(0xFF3DEBA8)),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _summaryTile(
+                  colors, 'Expenses', expenses, const Color(0xFFFF5C7A)),
+            ),
           ],
+        ),
+      const SizedBox(height: 14),
+      SearchField(
+        colors: colors,
+        controller: _searchController,
+        hint: 'Search transactions…',
+        onChanged: (v) => setState(() => _search = v),
+      ),
+    ];
+
+    final list = <Widget>[
+      if (dates.isEmpty)
+        EmptyState(
+          icon: Icons.receipt_long_outlined,
+          title: 'No transactions',
+          subtitle: 'No entries match your filter',
+          colors: colors,
+        )
+      else
+        for (final date in dates) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(2, 0, 0, 8),
+            child: Text(fmtDate(date).toUpperCase(),
+                style: sans(
+                    size: 12,
+                    weight: FontWeight.w700,
+                    color: colors.sub,
+                    letterSpacing: 0.6)),
+          ),
+          Container(
+            margin: const EdgeInsets.only(bottom: 14),
+            decoration: BoxDecoration(
+              color: colors.card,
+              border: Border.all(color: colors.border),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              children: [
+                for (int i = 0; i < groups[date]!.length; i++) ...[
+                  if (i > 0) ThinDivider(colors: colors, indent: 16),
+                  _txRow(colors, groups[date]![i], app),
+                ],
+              ],
+            ),
+          ),
+        ],
+    ];
+
+    return ListView(
+      padding: context.pagePadding,
+      children: [
+        ContentWidth(
+          maxWidth: 1000,
+          child: wide
+              ? Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 300,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: controls,
+                      ),
+                    ),
+                    const SizedBox(width: 28),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: list,
+                      ),
+                    ),
+                  ],
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ...controls,
+                    const SizedBox(height: 14),
+                    ...list,
+                  ],
+                ),
+        ),
       ],
     );
   }

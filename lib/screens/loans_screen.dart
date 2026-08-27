@@ -7,6 +7,7 @@ import '../theme/app_text.dart';
 import '../theme/palette.dart';
 import '../theme/theme_controller.dart';
 import '../utils/formatters.dart';
+import '../utils/responsive.dart';
 import '../widgets/common.dart';
 import '../widgets/form_fields.dart';
 import 'modals/sheets.dart';
@@ -41,66 +42,97 @@ class _LoansScreenState extends State<LoansScreen> {
         .fold(0.0, (s, l) => s + l.amount);
     final filtered = app.loans.where((l) => l.loanType == _tab).toList();
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 110),
-      children: [
-        Row(
+    final wide = context.isWide;
+
+    final addCard = GestureDetector(
+      onTap: () => showAddLoanSheet(context),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 15),
+        decoration: BoxDecoration(
+          border: Border.all(color: colors.border, width: 1.5),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Expanded(
-              child: _summaryTile(
-                  colors, 'I Lent', lentTotal, const Color(0xFF3DEBA8)),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _summaryTile(colors, 'I Borrowed', borrowedTotal,
-                  const Color(0xFFFF5C7A)),
-            ),
+            Icon(Icons.add, size: 18, color: colors.sub),
+            const SizedBox(width: 8),
+            Text('Record Loan',
+                style: sans(
+                    size: 15, weight: FontWeight.w600, color: colors.sub)),
           ],
         ),
-        const SizedBox(height: 14),
-        SegmentedControl<String>(
-          colors: colors,
-          value: _tab,
-          options: const [
-            (value: 'lent', label: 'I Lent'),
-            (value: 'borrowed', label: 'I Borrowed'),
-          ],
-          onChanged: (v) => setState(() => _tab = v),
-        ),
-        const SizedBox(height: 14),
-        if (filtered.isEmpty)
-          EmptyState(
-            icon: Icons.people_outline,
-            title: _tab == 'lent' ? 'No money lent' : 'No loans borrowed',
-            subtitle: 'Tap + to record a loan',
-            colors: colors,
-          )
-        else
-          for (final loan in filtered) ...[
-            _loanCard(colors, app, loan),
-            const SizedBox(height: 12),
-          ],
-        const SizedBox(height: 2),
-        GestureDetector(
-          onTap: () => showAddLoanSheet(context),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 15),
-            decoration: BoxDecoration(
-              border: Border.all(color: colors.border, width: 1.5),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.add, size: 18, color: colors.sub),
-                const SizedBox(width: 8),
-                Text('Record Loan',
-                    style: sans(
-                        size: 15,
-                        weight: FontWeight.w600,
-                        color: colors.sub)),
+      ),
+    );
+
+    return ListView(
+      padding: context.pagePadding,
+      children: [
+        ContentWidth(
+          maxWidth: 900,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: _summaryTile(
+                        colors, 'I Lent', lentTotal, const Color(0xFF3DEBA8)),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _summaryTile(colors, 'I Borrowed', borrowedTotal,
+                        const Color(0xFFFF5C7A)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              SegmentedControl<String>(
+                colors: colors,
+                value: _tab,
+                options: const [
+                  (value: 'lent', label: 'I Lent'),
+                  (value: 'borrowed', label: 'I Borrowed'),
+                ],
+                onChanged: (v) => setState(() => _tab = v),
+              ),
+              const SizedBox(height: 16),
+              if (filtered.isEmpty) ...[
+                EmptyState(
+                  icon: Icons.people_outline,
+                  title:
+                      _tab == 'lent' ? 'No money lent' : 'No loans borrowed',
+                  subtitle: 'Tap + to record a loan',
+                  colors: colors,
+                ),
+                const SizedBox(height: 14),
+                addCard,
+              ] else if (wide)
+                LayoutBuilder(
+                  builder: (_, c) {
+                    final cardWidth = (c.maxWidth - 16) / 2;
+                    return Wrap(
+                      spacing: 16,
+                      runSpacing: 16,
+                      children: [
+                        for (final loan in filtered)
+                          SizedBox(
+                            width: cardWidth,
+                            child: _loanCard(colors, app, loan),
+                          ),
+                        SizedBox(width: cardWidth, child: addCard),
+                      ],
+                    );
+                  },
+                )
+              else ...[
+                for (final loan in filtered) ...[
+                  _loanCard(colors, app, loan),
+                  const SizedBox(height: 12),
+                ],
+                addCard,
               ],
-            ),
+            ],
           ),
         ),
       ],
