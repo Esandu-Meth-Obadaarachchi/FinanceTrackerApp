@@ -86,6 +86,9 @@ class AppTransaction {
   bool get isRecurring => recurringId != null && recurringId!.isNotEmpty;
   bool get isLoanPayment => loanId != null && loanId!.isNotEmpty;
 
+  /// A receipt split off a pending income that was only part paid.
+  bool get isPartPayment => parentId != null && parentId!.isNotEmpty;
+
   DateTime get dateTime => DateTime.tryParse(date) ?? DateTime(2000);
   String get monthKey => date.length >= 7 ? date.substring(0, 7) : date;
 }
