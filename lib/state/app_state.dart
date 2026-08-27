@@ -97,12 +97,12 @@ class AppState extends ChangeNotifier {
 
   /// Outstanding money lent to others — what is still to be collected.
   double get totalLent => loans
-      .where((l) => l.isLent && l.isPending)
+      .where((l) => l.isLent && !isSettled(l))
       .fold(0.0, (sum, l) => sum + outstandingOf(l));
 
   /// Outstanding money owed to others on borrowed loans.
   double get totalBorrowed => loans
-      .where((l) => !l.isLent && l.isPending)
+      .where((l) => !l.isLent && !isSettled(l))
       .fold(0.0, (sum, l) => sum + outstandingOf(l));
 
   // ── Loan settlement ────────────────────────────────────────────────────
@@ -117,6 +117,10 @@ class AppState extends ChangeNotifier {
 
   /// What is still to be settled on [l]; never negative.
   double outstandingOf(Loan l) => loanOutstanding(l, transactions);
+
+  /// Whether [l] is fully settled. Prefer this over `loan.isPending` in the
+  /// UI: it reopens a loan if its payment entries are deleted.
+  bool isSettled(Loan l) => loanIsSettled(l, transactions);
 
   Account? accountById(String id) {
     for (final a in accounts) {

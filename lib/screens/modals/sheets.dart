@@ -1080,6 +1080,359 @@ class _AddLoanSheetState extends State<_AddLoanSheet> {
 }
 
 // ════════════════════════════════════════════════════════════════════════
+// Settle a loan (full or partial)
+// ════════════════════════════════════════════════════════════════════════
+
+/// Record money received on a lent loan, or paid on a borrowed one.
+void showLoanPaymentSheet(BuildContext context, Loan loan) {
+  _showWithState(context, _LoanPaymentSheet(loan: loan));
+}
+
+class _LoanPaymentSheet extends StatefulWidget {
+  const _LoanPaymentSheet({required this.loan});
+  final Loan loan;
+
+  @override
+  State<_LoanPaymentSheet> createState() => _LoanPaymentSheetState();
+}
+
+class _LoanPaymentSheetState extends State<_LoanPaymentSheet> {
+  final _amountCtrl = TextEditingController();
+  final _note = TextEditingController();
+  DateTime _date = DateTime.now();
+  String _accountId = '';
+  bool _saving = false;
+  bool _initialised = false;
+
+  /// The amount being settled. Kept as the source of truth so the slider and
+  /// the text field can drive each other without fighting over the cursor.
+  double _value = 0;
+
+  @override
+  void dispose() {
+    _amountCtrl.dispose();
+    _note.dispose();
+    super.dispose();
+  }
+
+  /// Plain digits for the editable field — no grouping, so it re-parses.
+  static String _plain(double v) =>
+      v == v.roundToDouble() ? v.round().toString() : v.toStringAsFixed(2);
+
+  void _setValue(double v, double outstanding, {bool syncText = true}) {
+    final clamped = v.clamp(0, outstanding).toDouble();
+    setState(() => _value = clamped);
+    if (syncText) _amountCtrl.text = _plain(clamped);
+  }
+
+  Future<void> _save(AppState app, double outstanding) async {
+    if (_value <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Enter an amount to settle')));
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      await app.recordLoanPayment(
+        widget.loan,
+        amount: _value,
+        accountId: _accountId,
+        date: dateKeyOf(_date),
+        note: _note.text,
+      );
+      if (mounted) Navigator.of(context).pop();
+    } catch (_) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not record the payment')));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.read<ThemeController>().colors;
+    final app = context.watch<AppState>();
+    final loan = widget.loan;
+    final accounts = app.accounts;
+
+    final outstanding = app.outstandingOf(loan);
+    final repaid = app.repaidOf(loan);
+    final lent = loan.isLent;
+    final tone = lent ? const Color(0xFF3DEBA8) : const Color(0xFFFF5C7A);
+
+    // Default to settling the lot; the slider drags it down from there.
+    if (!_initialised) {
+      _initialised = true;
+      _value = outstanding;
+      _amountCtrl.text = _plain(outstanding);
+      _accountId = loan.accountId;
+    }
+    if (_accountId.isEmpty && accounts.isNotEmpty) {
+      _accountId = accounts.first.id;
+    }
+
+    return SheetScaffold(
+      title: lent ? 'Money Received' : 'Make a Payment',
+      colors: colors,
+      children: [
+        _loanSummary(colors, app, loan, repaid, outstanding, tone),
+        const SizedBox(height: 16),
+        _amountBox(colors, tone, outstanding),
+        const SizedBox(height: 6),
+        if (outstanding > 0) _slider(colors, tone, outstanding),
+        const SizedBox(height: 6),
+        _quickPicks(colors, tone, outstanding),
+        const SizedBox(height: 18),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            FieldLabel('Date', colors: colors),
+            GestureDetector(
+              onTap: () async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: _date,
+                  firstDate: DateTime(2015),
+                  lastDate: DateTime(2100),
+                );
+                if (picked != null) setState(() => _date = picked);
+              },
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+                decoration: BoxDecoration(
+                  color: colors.inputBg,
+                  border: Border.all(color: colors.inputBorder),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Text(fmtDate(dateKeyOf(_date)),
+                        style: sans(size: 14, color: colors.text)),
+                    const Spacer(),
+                    Icon(Icons.calendar_today_outlined,
+                        size: 16, color: colors.sub),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (accounts.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          AppDropdown<String>(
+            colors: colors,
+            label: lent ? 'Received Into' : 'Paid From',
+            value: accounts.any((a) => a.id == _accountId)
+                ? _accountId
+                : accounts.first.id,
+            items: [
+              for (final a in accounts)
+                DropdownMenuItem(value: a.id, child: Text(a.name)),
+            ],
+            onChanged: (v) => setState(() => _accountId = v ?? ''),
+          ),
+        ],
+        const SizedBox(height: 14),
+        AppTextField(
+          colors: colors,
+          controller: _note,
+          label: 'Note (optional)',
+          hint: lent
+              ? 'Repayment from ${loan.who}'
+              : 'Repayment to ${loan.who}',
+        ),
+        const SizedBox(height: 10),
+        _effectHint(colors, lent, outstanding),
+        const SizedBox(height: 18),
+        PrimaryButton(
+          label: _value > 0
+              ? 'Record Rs ${fmtFull(_value)}'
+              : 'Record payment',
+          color: tone,
+          busy: _saving,
+          onPressed: () => _save(app, outstanding),
+        ),
+      ],
+    );
+  }
+
+  // ── Loan context: who, progress so far, what is left ───────────────────
+  Widget _loanSummary(Palette colors, AppState app, Loan loan, double repaid,
+      double outstanding, Color tone) {
+    final progress = loan.amount > 0 ? (repaid / loan.amount).clamp(0.0, 1.0) : 0.0;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colors.inputBg,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(loan.who,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: sans(
+                        size: 14,
+                        weight: FontWeight.w700,
+                        color: colors.text)),
+              ),
+              Text('Rs ${fmt(outstanding)} left',
+                  style: mono(size: 13, weight: FontWeight.w700, color: tone)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 6,
+              backgroundColor: colors.elevated,
+              valueColor: AlwaysStoppedAnimation(tone),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text('Rs ${fmt(repaid)} of Rs ${fmt(loan.amount)} settled',
+              style: sans(size: 11.5, color: colors.sub)),
+        ],
+      ),
+    );
+  }
+
+  // ── Big editable amount ────────────────────────────────────────────────
+  Widget _amountBox(Palette colors, Color tone, double outstanding) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      decoration: BoxDecoration(
+        color: colors.inputBg,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          Text('AMOUNT (LKR)',
+              style: sans(
+                  size: 12,
+                  weight: FontWeight.w600,
+                  color: colors.sub,
+                  letterSpacing: 0.6)),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text('Rs ', style: mono(size: 22, color: colors.sub)),
+              IntrinsicWidth(
+                child: TextField(
+                  controller: _amountCtrl,
+                  textAlign: TextAlign.center,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [amountFormatter],
+                  style: mono(size: 36, weight: FontWeight.w700, color: tone),
+                  cursorColor: tone,
+                  // Typed edits move the slider, but leave the field alone so
+                  // the caret stays where the user put it.
+                  onChanged: (raw) => _setValue(
+                      double.tryParse(raw.trim()) ?? 0, outstanding,
+                      syncText: false),
+                  decoration: InputDecoration(
+                    isCollapsed: true,
+                    border: InputBorder.none,
+                    hintText: '0',
+                    hintStyle: mono(
+                        size: 36, weight: FontWeight.w700, color: colors.muted),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _slider(Palette colors, Color tone, double outstanding) {
+    return SliderTheme(
+      data: SliderTheme.of(context).copyWith(
+        activeTrackColor: tone,
+        inactiveTrackColor: colors.elevated,
+        thumbColor: tone,
+        overlayColor: tone.withValues(alpha: 0.14),
+        trackHeight: 5,
+      ),
+      child: Slider(
+        value: _value.clamp(0, outstanding).toDouble(),
+        max: outstanding,
+        onChanged: (v) => _setValue(v.roundToDouble(), outstanding),
+      ),
+    );
+  }
+
+  Widget _quickPicks(Palette colors, Color tone, double outstanding) {
+    final picks = <(String, double)>[
+      ('25%', outstanding * 0.25),
+      ('50%', outstanding * 0.5),
+      ('75%', outstanding * 0.75),
+      ('All', outstanding),
+    ];
+    return Row(
+      children: [
+        for (final (label, amount) in picks) ...[
+          Expanded(
+            child: GestureDetector(
+              onTap: () => _setValue(amount.roundToDouble(), outstanding),
+              child: Container(
+                margin: EdgeInsets.only(right: label == 'All' ? 0 : 8),
+                padding: const EdgeInsets.symmetric(vertical: 9),
+                decoration: BoxDecoration(
+                  color: tone.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Center(
+                  child: Text(label,
+                      style: sans(
+                          size: 12.5,
+                          weight: FontWeight.w600,
+                          color: tone)),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// Spells out what saving will do, so the income/expense side effect is
+  /// never a surprise.
+  Widget _effectHint(Palette colors, bool lent, double outstanding) {
+    final left = (outstanding - _value).clamp(0, double.infinity).toDouble();
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(Icons.info_outline, size: 14, color: colors.sub),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            lent
+                ? 'Adds Rs ${fmtFull(_value)} to income. '
+                    'Rs ${fmt(left)} will still be owed to you.'
+                : 'Adds Rs ${fmtFull(_value)} to expenses. '
+                    'You will still owe Rs ${fmt(left)}.',
+            style: sans(size: 11.5, color: colors.sub),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════
 // Add / edit recurring rule
 // ════════════════════════════════════════════════════════════════════════
 void showAddRecurringSheet(BuildContext context, {RecurringRule? edit}) {

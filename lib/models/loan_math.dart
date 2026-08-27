@@ -21,6 +21,17 @@ double loanRepaid(Loan l, Iterable<AppTransaction> txs) =>
 double loanOutstanding(Loan l, Iterable<AppTransaction> txs) =>
     (l.amount - loanRepaid(l, txs)).clamp(0, double.infinity).toDouble();
 
+/// Whether [l] is fully settled.
+///
+/// Derived from the payments where a loan has any, so deleting a payment
+/// transaction reopens the loan instead of stranding it as `repaid`. Loans
+/// with no payments fall back to the stored status, which covers both
+/// untouched loans and ones settled before partial repayments existed.
+bool loanIsSettled(Loan l, Iterable<AppTransaction> txs) =>
+    loanPayments(txs, l.id).isEmpty
+        ? !l.isPending
+        : loanOutstanding(l, txs) <= 0.005;
+
 /// Whether [l] still takes its original amount out of its account.
 ///
 /// Money lent out physically left the account, and each repayment returns as

@@ -77,6 +77,33 @@ void main() {
     });
   });
 
+  group('settled', () {
+    test('an untouched pending loan is not settled', () {
+      expect(loanIsSettled(loan(), const []), isFalse);
+    });
+
+    test('a partly paid loan is not settled', () {
+      expect(loanIsSettled(loan(), [payment(amount: 4000)]), isFalse);
+    });
+
+    test('a fully paid loan is settled', () {
+      final txs = [payment(amount: 4000), payment(amount: 6000)];
+      expect(loanIsSettled(loan(), txs), isTrue);
+    });
+
+    test('deleting a payment reopens a loan still marked repaid', () {
+      // The stored status says repaid, but its payments are gone, so the
+      // loan must come back as outstanding rather than strand itself.
+      final stale = loan(status: 'repaid');
+      expect(loanIsSettled(stale, [payment(amount: 4000)]), isFalse);
+      expect(loanOutstanding(stale, [payment(amount: 4000)]), 6000);
+    });
+
+    test('legacy loans with no payments honour the stored status', () {
+      expect(loanIsSettled(loan(status: 'repaid'), const []), isTrue);
+    });
+  });
+
   group('balance — lent loans', () {
     test('lending takes the money out of the account', () {
       final b = accountBalance(acc(opening: 50000), const [], [loan()]);
