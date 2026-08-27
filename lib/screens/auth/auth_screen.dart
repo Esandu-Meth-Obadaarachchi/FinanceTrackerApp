@@ -5,6 +5,7 @@ import '../../services/auth_service.dart';
 import '../../theme/app_text.dart';
 import '../../theme/palette.dart';
 import '../../theme/theme_controller.dart';
+import '../../utils/responsive.dart';
 import '../../widgets/form_fields.dart';
 
 /// Sign-in / sign-up screen (email + password).
@@ -108,23 +109,47 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = context.watch<ThemeController>().colors;
+    final wide = context.isWide;
+
+    final form = SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: _form(colors, wide),
+        ),
+      ),
+    );
 
     return Scaffold(
       backgroundColor: colors.bg,
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 400),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+        child: wide
+            ? Row(
                 children: [
-                  _logo(),
-                  const SizedBox(height: 22),
+                  Expanded(child: _brandPanel(colors)),
+                  Expanded(child: form),
+                ],
+              )
+            : form,
+      ),
+    );
+  }
+
+  Widget _form(Palette colors, bool wide) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+                  // The brand panel already carries the mark on desktop.
+                  if (!wide) ...[
+                    _logo(),
+                    const SizedBox(height: 22),
+                  ],
                   Text(
-                    'FinTrack',
-                    textAlign: TextAlign.center,
+                    wide
+                        ? (_isSignUp ? 'Create account' : 'Sign in')
+                        : 'FinTrack',
+                    textAlign: wide ? TextAlign.left : TextAlign.center,
                     style: sans(
                         size: 28,
                         weight: FontWeight.w800,
@@ -135,7 +160,7 @@ class _AuthScreenState extends State<AuthScreen> {
                     _isSignUp
                         ? 'Create your account to get started'
                         : 'Welcome back — sign in to continue',
-                    textAlign: TextAlign.center,
+                    textAlign: wide ? TextAlign.left : TextAlign.center,
                     style: sans(size: 14, color: colors.sub),
                   ),
                   const SizedBox(height: 30),
@@ -214,11 +239,82 @@ class _AuthScreenState extends State<AuthScreen> {
                       ),
                     ],
                   ),
-                ],
+      ],
+    );
+  }
+
+  /// Desktop-only left panel: turns the sign-in page into a landing page
+  /// instead of a lone form floating in the middle of a wide window.
+  Widget _brandPanel(Palette colors) {
+    return Container(
+      decoration: const BoxDecoration(gradient: Brand.hero),
+      child: Stack(
+        children: [
+          Positioned(
+            right: -60,
+            top: -60,
+            child: Container(
+              width: 260,
+              height: 260,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0xFF3DEBA8).withValues(alpha: 0.10),
               ),
             ),
           ),
-        ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 56, vertical: 48),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: Image.asset('assets/logo.png',
+                      width: 72, height: 72, fit: BoxFit.cover),
+                ),
+                const SizedBox(height: 26),
+                Text('FinTrack',
+                    style: sans(
+                        size: 40,
+                        weight: FontWeight.w800,
+                        color: const Color(0xFFECF0FF))),
+                const SizedBox(height: 10),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 380),
+                  child: Text(
+                    'Every account, loan and rupee in one place. '
+                    'Plan the month, track what lands, export at tax time.',
+                    style: sans(
+                        size: 15.5,
+                        color: const Color(0xFF7A9DC0),
+                        height: 1.55),
+                  ),
+                ),
+                const SizedBox(height: 34),
+                _feature(Icons.account_balance_wallet_outlined,
+                    'Balances that compute themselves'),
+                _feature(Icons.pie_chart_outline, 'Zero-based monthly planner'),
+                _feature(Icons.people_outline, 'Loans lent and borrowed'),
+                _feature(Icons.download_outlined, 'CSV export for filing'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _feature(IconData icon, String label) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: const Color(0xFF3DEBA8)),
+          const SizedBox(width: 12),
+          Text(label,
+              style: sans(size: 14, color: const Color(0xFFB8C7DE))),
+        ],
       ),
     );
   }

@@ -95,18 +95,6 @@ class FinTrackApp extends StatelessWidget {
             theme: _theme(false),
             darkTheme: _theme(true),
             themeMode: theme.isDark ? ThemeMode.dark : ThemeMode.light,
-            builder: (context, child) {
-              // Centre the app inside a phone-width frame on wide screens.
-              return ColoredBox(
-                color: Brand.backdrop,
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 480),
-                    child: child ?? const SizedBox.shrink(),
-                  ),
-                ),
-              );
-            },
             home: firebaseReady
                 ? const AuthGate()
                 : const _FirebaseNotConfigured(),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/categories.dart';
+import '../models/account.dart';
 import '../models/app_transaction.dart';
 import '../state/app_state.dart';
 import '../theme/app_text.dart';
@@ -9,6 +10,7 @@ import '../theme/palette.dart';
 import '../theme/theme_controller.dart';
 import '../utils/color_x.dart';
 import '../utils/formatters.dart';
+import '../utils/responsive.dart';
 import '../widgets/common.dart';
 import 'budget_screen.dart';
 import 'modals/sheets.dart';
@@ -44,81 +46,158 @@ class DashboardScreen extends StatelessWidget {
     final recent = [...app.transactions]
       ..sort((a, b) => b.dateTime.compareTo(a.dateTime));
 
+    final budget = GestureDetector(
+      onTap: () => openBudgetPlanner(context),
+      child: _budgetCard(colors, income, expenses, pending),
+    );
+
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 110),
+      padding: context.pagePadding,
       children: [
-        _heroCard(colors, app.totalBalance, income, expenses, net),
-        const SizedBox(height: 16),
-        _accountsRow(context, colors, app),
-        const SizedBox(height: 16),
-        GestureDetector(
-          onTap: () => openBudgetPlanner(context),
-          child: _budgetCard(colors, income, expenses, pending),
+        ContentWidth(
+          child: context.isWide
+              ? _wideBody(context, colors, app, monthTxs, recent, budget,
+                  income, expenses, net, pending, lent)
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _heroCard(context, colors, app.totalBalance, income, expenses, net),
+                    const SizedBox(height: 16),
+                    _accountsRow(context, colors, app),
+                    const SizedBox(height: 16),
+                    budget,
+                    if (lent > 0 || pending > 0) ...[
+                      const SizedBox(height: 16),
+                      _receivablesCard(colors, lent, pending),
+                    ],
+                    if (expenses > 0) ...[
+                      const SizedBox(height: 16),
+                      _breakdownCard(colors, monthTxs, expenses),
+                    ],
+                    const SizedBox(height: 16),
+                    _recentCard(context, colors, recent.take(5).toList(), app),
+                  ],
+                ),
         ),
-        if (lent > 0 || pending > 0) ...[
-          const SizedBox(height: 16),
-          _receivablesCard(colors, lent, pending),
-        ],
-        if (expenses > 0) ...[
-          const SizedBox(height: 16),
-          _breakdownCard(colors, monthTxs, expenses),
-        ],
-        const SizedBox(height: 16),
-        _recentCard(context, colors, recent.take(5).toList(), app),
+      ],
+    );
+  }
+
+  /// Desktop: hero and accounts span the full width, then the remaining cards
+  /// sit in two columns so the page fills a monitor instead of a phone strip.
+  Widget _wideBody(
+    BuildContext context,
+    Palette colors,
+    AppState app,
+    List<AppTransaction> monthTxs,
+    List<AppTransaction> recent,
+    Widget budget,
+    double income,
+    double expenses,
+    double net,
+    double pending,
+    double lent,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _heroCard(context, colors, app.totalBalance, income, expenses, net),
+        const SizedBox(height: 22),
+        _accountsRow(context, colors, app),
+        const SizedBox(height: 22),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  budget,
+                  if (lent > 0 || pending > 0) ...[
+                    const SizedBox(height: 22),
+                    _receivablesCard(colors, lent, pending),
+                  ],
+                  if (expenses > 0) ...[
+                    const SizedBox(height: 22),
+                    _breakdownCard(colors, monthTxs, expenses),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 22),
+            Expanded(
+              child: _recentCard(
+                  context, colors, recent.take(8).toList(), app),
+            ),
+          ],
+        ),
       ],
     );
   }
 
   // ── Net worth hero ───────────────────────────────────────────────────
-  Widget _heroCard(
-      Palette colors, double total, double income, double expenses, double net) {
+  Widget _heroCard(BuildContext context, Palette colors, double total,
+      double income, double expenses, double net) {
+    final wide = context.isWide;
+    final balance = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('TOTAL BALANCE',
+            style: sans(
+                size: 12,
+                weight: FontWeight.w600,
+                color: const Color(0xFF7A9DC0),
+                letterSpacing: 0.7)),
+        const SizedBox(height: 8),
+        Text('Rs ${fmt(total)}',
+            style: mono(
+                size: wide ? 46 : 38,
+                weight: FontWeight.w800,
+                color: const Color(0xFFECF0FF))),
+      ],
+    );
+    final stats = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _heroStat('Income', '+Rs ${fmt(income)}', const Color(0xFF3DEBA8)),
+        _heroDivider(),
+        _heroStat('Expenses', '-Rs ${fmt(expenses)}', const Color(0xFFFF5C7A)),
+        _heroDivider(),
+        _heroStat(
+            'Net',
+            '${net >= 0 ? '+' : ''}Rs ${fmt(net)}',
+            net >= 0 ? const Color(0xFF3DEBA8) : const Color(0xFFFF5C7A)),
+      ],
+    );
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(24),
       child: Stack(
         children: [
           Container(
             decoration: const BoxDecoration(gradient: Brand.hero),
-            padding: const EdgeInsets.fromLTRB(22, 24, 22, 24),
+            padding: EdgeInsets.fromLTRB(wide ? 32 : 22, wide ? 32 : 24,
+                wide ? 32 : 22, wide ? 32 : 24),
             width: double.infinity,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('TOTAL BALANCE',
-                    style: sans(
-                        size: 12,
-                        weight: FontWeight.w600,
-                        color: const Color(0xFF7A9DC0),
-                        letterSpacing: 0.7)),
-                const SizedBox(height: 8),
-                Text('Rs ${fmt(total)}',
-                    style: mono(
-                        size: 38,
-                        weight: FontWeight.w800,
-                        color: const Color(0xFFECF0FF))),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    _heroStat('Income', '+Rs ${fmt(income)}',
-                        const Color(0xFF3DEBA8)),
-                    _heroDivider(),
-                    _heroStat('Expenses', '-Rs ${fmt(expenses)}',
-                        const Color(0xFFFF5C7A)),
-                    _heroDivider(),
-                    _heroStat(
-                        'Net',
-                        '${net >= 0 ? '+' : ''}Rs ${fmt(net)}',
-                        net >= 0
-                            ? const Color(0xFF3DEBA8)
-                            : const Color(0xFFFF5C7A)),
-                  ],
-                ),
-              ],
-            ),
+            // Wide enough to sit the stats beside the balance instead of under it.
+            child: wide
+                ? Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [balance, const Spacer(), stats],
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      balance,
+                      const SizedBox(height: 16),
+                      stats,
+                    ],
+                  ),
           ),
           Positioned(
             right: -20,
             top: -20,
-            child: _glow(120, 0.12),
+            child: _glow(wide ? 200 : 120, 0.12),
           ),
         ],
       ),
@@ -166,55 +245,63 @@ class DashboardScreen extends StatelessWidget {
                 color: colors.sub,
                 letterSpacing: 0.6)),
         const SizedBox(height: 10),
-        SizedBox(
-          height: 116,
-          child: app.accounts.isEmpty
-              ? Align(
-                  alignment: Alignment.centerLeft,
-                  child: GestureDetector(
-                    onTap: () => showAddAccountSheet(context),
-                    child: Text('+ Add your first account',
-                        style: sans(size: 13, color: colors.sub)),
-                  ),
-                )
-              : ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: app.accounts.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 10),
-                  itemBuilder: (_, i) {
-                    final acc = app.accounts[i];
-                    final color = colorFromHex(acc.colorHex);
-                    return Container(
-                      width: 140,
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: colors.card,
-                        border: Border.all(color: colors.border),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          AccountIconBox(
-                              type: acc.type, color: color, size: 30),
-                          const SizedBox(height: 10),
-                          Text(acc.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: sans(size: 11, color: colors.sub)),
-                          const SizedBox(height: 2),
-                          Text('Rs ${fmt(app.balanceOf(acc))}',
-                              style: mono(
-                                  size: 16,
-                                  weight: FontWeight.w700,
-                                  color: colors.text)),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-        ),
+        if (app.accounts.isEmpty)
+          GestureDetector(
+            onTap: () => showAddAccountSheet(context),
+            child: Text('+ Add your first account',
+                style: sans(size: 13, color: colors.sub)),
+          )
+        else if (context.isWide)
+          // Desktop has the room to show every account at once.
+          Wrap(
+            spacing: 14,
+            runSpacing: 14,
+            children: [
+              for (final acc in app.accounts)
+                _accountTile(colors, app, acc, width: 180),
+            ],
+          )
+        else
+          SizedBox(
+            height: 116,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: app.accounts.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (_, i) =>
+                  _accountTile(colors, app, app.accounts[i], width: 140),
+            ),
+          ),
       ],
+    );
+  }
+
+  Widget _accountTile(Palette colors, AppState app, Account acc,
+      {required double width}) {
+    final color = colorFromHex(acc.colorHex);
+    return Container(
+      width: width,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colors.card,
+        border: Border.all(color: colors.border),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AccountIconBox(type: acc.type, color: color, size: 30),
+          const SizedBox(height: 10),
+          Text(acc.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: sans(size: 11, color: colors.sub)),
+          const SizedBox(height: 2),
+          Text('Rs ${fmt(app.balanceOf(acc))}',
+              style: mono(
+                  size: 16, weight: FontWeight.w700, color: colors.text)),
+        ],
+      ),
     );
   }
 

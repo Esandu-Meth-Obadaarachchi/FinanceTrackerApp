@@ -10,6 +10,7 @@ import '../theme/app_text.dart';
 import '../theme/palette.dart';
 import '../theme/theme_controller.dart';
 import '../utils/formatters.dart';
+import '../utils/responsive.dart';
 import 'accounts_screen.dart';
 import 'dashboard_screen.dart';
 import 'loans_screen.dart';
@@ -97,39 +98,368 @@ class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final colors = context.watch<ThemeController>().colors;
+    final showMonths = _screen == AppScreen.dashboard ||
+        _screen == AppScreen.transactions;
 
     return Scaffold(
       backgroundColor: colors.bg,
-      body: Stack(
+      body: context.isWide
+          ? Row(
+              children: [
+                _SideNav(
+                  colors: colors,
+                  active: _screen,
+                  onSelect: (s) => setState(() => _screen = s),
+                  onAdd: _onAddPressed,
+                ),
+                Expanded(
+                  child: Column(
+                    children: [
+                      _DesktopTopBar(
+                        title: _titles[_screen]!,
+                        colors: colors,
+                        showMonths: showMonths,
+                        month: _month,
+                        onMonth: (m) => setState(() => _month = m),
+                      ),
+                      Expanded(child: _body()),
+                    ],
+                  ),
+                ),
+              ],
+            )
+          : Stack(
+              children: [
+                Column(
+                  children: [
+                    _TopBar(
+                      title: _titles[_screen]!,
+                      colors: colors,
+                      showMonths: showMonths,
+                      month: _month,
+                      onMonth: (m) => setState(() => _month = m),
+                      accountsActive: _screen == AppScreen.accounts,
+                      onWallet: () =>
+                          setState(() => _screen = AppScreen.accounts),
+                    ),
+                    Expanded(child: _body()),
+                  ],
+                ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: _BottomNav(
+                    colors: colors,
+                    active: _screen,
+                    onSelect: (s) => setState(() => _screen = s),
+                    onAdd: _onAddPressed,
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+// ── Desktop side rail ─────────────────────────────────────────────────────
+const _navEntries = <(AppScreen, IconData, IconData, String)>[
+  (AppScreen.dashboard, Icons.home_outlined, Icons.home_rounded, 'Overview'),
+  (
+    AppScreen.transactions,
+    Icons.receipt_long_outlined,
+    Icons.receipt_long,
+    'Transactions'
+  ),
+  (
+    AppScreen.accounts,
+    Icons.account_balance_wallet_outlined,
+    Icons.account_balance_wallet,
+    'Accounts'
+  ),
+  (AppScreen.loans, Icons.people_outline, Icons.people, 'Loans'),
+  (AppScreen.tax, Icons.description_outlined, Icons.description, 'Tax Report'),
+];
+
+class _SideNav extends StatelessWidget {
+  const _SideNav({
+    required this.colors,
+    required this.active,
+    required this.onSelect,
+    required this.onAdd,
+  });
+
+  final Palette colors;
+  final AppScreen active;
+  final ValueChanged<AppScreen> onSelect;
+  final VoidCallback onAdd;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = context.watch<ThemeController>();
+    return Container(
+      width: 248,
+      decoration: BoxDecoration(
+        color: colors.isDark ? const Color(0xFF0F1520) : Colors.white,
+        border: Border(right: BorderSide(color: colors.border)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Column(
-            children: [
-              _TopBar(
-                title: _titles[_screen]!,
-                colors: colors,
-                showMonths: _screen == AppScreen.dashboard ||
-                    _screen == AppScreen.transactions,
-                month: _month,
-                onMonth: (m) => setState(() => _month = m),
-                accountsActive: _screen == AppScreen.accounts,
-                onWallet: () =>
-                    setState(() => _screen = AppScreen.accounts),
-              ),
-              Expanded(child: _body()),
-            ],
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: _BottomNav(
-              colors: colors,
-              active: _screen,
-              onSelect: (s) => setState(() => _screen = s),
-              onAdd: _onAddPressed,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 26, 20, 22),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.asset('assets/logo.png',
+                      width: 32, height: 32, fit: BoxFit.cover),
+                ),
+                const SizedBox(width: 10),
+                Text('FinTrack',
+                    style: sans(
+                        size: 18,
+                        weight: FontWeight.w800,
+                        color: colors.text)),
+              ],
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: _addButton(),
+          ),
+          const SizedBox(height: 20),
+          for (final (screen, icon, iconActive, label) in _navEntries)
+            _navItem(screen, icon, iconActive, label),
+          const Spacer(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+            child: InkWell(
+              onTap: theme.toggle,
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                child: Row(
+                  children: [
+                    Icon(theme.isDark ? Icons.light_mode : Icons.dark_mode,
+                        size: 19, color: colors.sub),
+                    const SizedBox(width: 12),
+                    Text(theme.isDark ? 'Light mode' : 'Dark mode',
+                        style: sans(size: 14, color: colors.sub)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 18),
+            child: _profileTile(context),
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _navItem(
+      AppScreen screen, IconData icon, IconData iconActive, String label) {
+    final isActive = active == screen;
+    final color = isActive ? const Color(0xFF3DEBA8) : colors.sub;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+      child: InkWell(
+        onTap: () => onSelect(screen),
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          decoration: BoxDecoration(
+            color: isActive
+                ? const Color(0xFF3DEBA8).withValues(alpha: 0.11)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              Icon(isActive ? iconActive : icon, size: 19, color: color),
+              const SizedBox(width: 12),
+              Text(label,
+                  style: sans(
+                      size: 14,
+                      weight: isActive ? FontWeight.w700 : FontWeight.w500,
+                      color: isActive ? colors.text : colors.sub)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _addButton() {
+    return InkWell(
+      onTap: onAdd,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 13),
+        decoration: BoxDecoration(
+          gradient: Brand.addButton,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF3DEBA8).withValues(alpha: 0.28),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.add, size: 19, color: Color(0xFF0B0D14)),
+            const SizedBox(width: 7),
+            Text('New entry',
+                style: sans(
+                    size: 14.5,
+                    weight: FontWeight.w700,
+                    color: const Color(0xFF0B0D14))),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _profileTile(BuildContext context) {
+    final user = AuthService().currentUser;
+    final email = user?.email ?? '';
+    final name = user?.displayName ?? 'Signed in';
+    final initial = (user?.displayName?.isNotEmpty == true
+            ? user!.displayName![0]
+            : (email.isNotEmpty ? email[0] : '?'))
+        .toUpperCase();
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: colors.elevated,
+        border: Border.all(color: colors.border),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: const BoxDecoration(
+              gradient: Brand.addButton,
+              borderRadius: BorderRadius.all(Radius.circular(10)),
+            ),
+            child: Center(
+              child: Text(initial,
+                  style: sans(
+                      size: 14,
+                      weight: FontWeight.w700,
+                      color: const Color(0xFF0B0D14))),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: sans(
+                        size: 13,
+                        weight: FontWeight.w700,
+                        color: colors.text)),
+                Text(email,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: sans(size: 11, color: colors.sub)),
+              ],
+            ),
+          ),
+          _ProfileMenu(colors: colors, compact: true),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Desktop top bar ───────────────────────────────────────────────────────
+class _DesktopTopBar extends StatelessWidget {
+  const _DesktopTopBar({
+    required this.title,
+    required this.colors,
+    required this.showMonths,
+    required this.month,
+    required this.onMonth,
+  });
+
+  final String title;
+  final Palette colors;
+  final bool showMonths;
+  final String month;
+  final ValueChanged<String> onMonth;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(32, 22, 32, 18),
+      decoration: BoxDecoration(
+        color: colors.bg,
+        border: Border(bottom: BorderSide(color: colors.border)),
+      ),
+      child: ContentWidth(
+        child: Row(
+          children: [
+            Text(title,
+                style: sans(
+                    size: 26, weight: FontWeight.w800, color: colors.text)),
+            const Spacer(),
+            if (showMonths)
+              Flexible(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  reverse: true,
+                  child: Row(
+                    children: [
+                      for (final m in recentMonths(12).reversed)
+                        _monthChip(m),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _monthChip(String m) {
+    final isActive = m == month;
+    return Padding(
+      padding: const EdgeInsets.only(left: 4),
+      child: InkWell(
+        onTap: () => onMonth(m),
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+          decoration: BoxDecoration(
+            color: isActive
+                ? const Color(0xFF3DEBA8).withValues(alpha: 0.13)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            fmtMonthShort(m),
+            style: sans(
+              size: 12.5,
+              weight: isActive ? FontWeight.w700 : FontWeight.w500,
+              color: isActive ? const Color(0xFF3DEBA8) : colors.sub,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -270,8 +600,11 @@ class _TopBar extends StatelessWidget {
 }
 
 class _ProfileMenu extends StatelessWidget {
-  const _ProfileMenu({required this.colors});
+  const _ProfileMenu({required this.colors, this.compact = false});
   final Palette colors;
+
+  /// Sidebar variant: a small "more" glyph instead of the avatar tile.
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -332,25 +665,27 @@ class _ProfileMenu extends StatelessWidget {
         if (v == 'signout') auth.signOut();
         if (v == 'settings') openSettings(context);
       },
-      child: Container(
-        width: 36,
-        height: 36,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF3DEBA8), Color(0xFF60A5FA)],
-          ),
-          borderRadius: BorderRadius.all(Radius.circular(10)),
-        ),
-        child: Center(
-          child: Text(
-            initial,
-            style: sans(
-                size: 15,
-                weight: FontWeight.w700,
-                color: const Color(0xFF0B0D14)),
-          ),
-        ),
-      ),
+      child: compact
+          ? Icon(Icons.more_horiz, size: 20, color: colors.sub)
+          : Container(
+              width: 36,
+              height: 36,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF3DEBA8), Color(0xFF60A5FA)],
+                ),
+                borderRadius: BorderRadius.all(Radius.circular(10)),
+              ),
+              child: Center(
+                child: Text(
+                  initial,
+                  style: sans(
+                      size: 15,
+                      weight: FontWeight.w700,
+                      color: const Color(0xFF0B0D14)),
+                ),
+              ),
+            ),
     );
   }
 }

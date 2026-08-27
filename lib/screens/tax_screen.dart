@@ -11,6 +11,7 @@ import '../theme/app_text.dart';
 import '../theme/palette.dart';
 import '../theme/theme_controller.dart';
 import '../utils/formatters.dart';
+import '../utils/responsive.dart';
 import '../widgets/common.dart';
 import '../widgets/form_fields.dart';
 
@@ -72,8 +73,13 @@ class _TaxScreenState extends State<TaxScreen> {
     final months = recentMonths(24);
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 110),
+      padding: context.pagePadding,
       children: [
+        ContentWidth(
+          maxWidth: 820,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
         // Report period
         AppCard(
           colors: colors,
@@ -183,11 +189,14 @@ class _TaxScreenState extends State<TaxScreen> {
           color: const Color(0xFF3DEBA8),
           onPressed: () => _exportCsv(app, filtered),
         ),
-        const SizedBox(height: 8),
-        Text(
-          'Export includes all transaction details for tax filing purposes',
-          textAlign: TextAlign.center,
-          style: sans(size: 12, color: colors.sub),
+              const SizedBox(height: 8),
+              Text(
+                'Export includes all transaction details for tax filing purposes',
+                textAlign: TextAlign.center,
+                style: sans(size: 12, color: colors.sub),
+              ),
+            ],
+          ),
         ),
       ],
     );

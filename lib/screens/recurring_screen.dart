@@ -7,6 +7,7 @@ import '../theme/app_text.dart';
 import '../theme/palette.dart';
 import '../theme/theme_controller.dart';
 import '../utils/formatters.dart';
+import '../utils/responsive.dart';
 import '../widgets/common.dart';
 import 'modals/sheets.dart';
 
@@ -54,7 +55,7 @@ class RecurringScreen extends StatelessWidget {
           ? const Center(
               child: CircularProgressIndicator(color: Color(0xFF3DEBA8)))
           : ListView(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
+              padding: centredInsets(context),
               children: [
                 Text(
                   'Fixed amounts auto-added each month. Edits apply to future '
