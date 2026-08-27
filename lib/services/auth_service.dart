@@ -5,7 +5,11 @@ import 'package:google_sign_in/google_sign_in.dart';
 /// Thin wrapper around FirebaseAuth with friendly error messages.
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
+
+  // Lazy: web never uses it (signInWithPopup instead), and constructing it
+  // there trips google_sign_in_web's missing-client-id assert in debug builds.
+  GoogleSignIn? _google;
+  GoogleSignIn get _googleSignIn => _google ??= GoogleSignIn();
 
   Stream<User?> get authState => _auth.authStateChanges();
   User? get currentUser => _auth.currentUser;
