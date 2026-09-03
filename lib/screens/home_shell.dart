@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../services/ai_service.dart';
 import '../services/auth_service.dart';
+import '../services/category_memory_service.dart';
 import '../services/messaging_service.dart';
 import '../services/notification_service.dart';
 import '../services/sms_service.dart';
@@ -10,12 +12,15 @@ import '../theme/app_text.dart';
 import '../theme/palette.dart';
 import '../theme/theme_controller.dart';
 import '../utils/formatters.dart';
+import '../services/sms_inbox.dart';
 import '../utils/responsive.dart';
 import 'accounts_screen.dart';
+import 'assistant_screen.dart';
 import 'dashboard_screen.dart';
 import 'loans_screen.dart';
 import 'modals/sheets.dart';
 import 'settings_screen.dart';
+import 'sms_review_screen.dart';
 import 'tax_screen.dart';
 import 'transactions_screen.dart';
 
@@ -46,6 +51,10 @@ class _HomeShellState extends State<HomeShell> {
       await NotificationService.instance.requestPermissions();
       await NotificationService.instance.rearmDailyReminders();
       await MessagingService.instance.subscribeUser(_appState.uid);
+      // Local layers the AI features read before reaching for the network.
+      await CategoryMemoryService.instance.load();
+      await AiService.instance.load();
+      await SmsInbox.instance.load();
     });
     // SMS auto-import needs accounts loaded to map tails — wait for first load.
     _appState.addListener(_maybeStartSms);
@@ -231,6 +240,34 @@ class _SideNav extends StatelessWidget {
           const SizedBox(height: 20),
           for (final (screen, icon, iconActive, label) in _navEntries)
             _navItem(screen, icon, iconActive, label),
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+            child: Text('AI',
+                style: sans(
+                    size: 11,
+                    weight: FontWeight.w700,
+                    color: colors.muted,
+                    letterSpacing: 0.7)),
+          ),
+          _pushItem(
+            context,
+            icon: Icons.auto_awesome,
+            label: 'Assistant',
+            onTap: () => openAssistant(context),
+          ),
+          // The badge is the whole point of the inbox: it is what tells you
+          // there is anything to do without opening the screen.
+          AnimatedBuilder(
+            animation: SmsInbox.instance,
+            builder: (_, __) => _pushItem(
+              context,
+              icon: Icons.inbox_outlined,
+              label: 'Review inbox',
+              badge: SmsInbox.instance.pendingCount,
+              onTap: () => openSmsReview(context),
+            ),
+          ),
           const Spacer(),
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
@@ -257,6 +294,50 @@ class _SideNav extends StatelessWidget {
             child: _profileTile(context),
           ),
         ],
+      ),
+    );
+  }
+
+  /// A sidebar row that pushes a route rather than switching tab.
+  Widget _pushItem(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    int badge = 0,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          child: Row(
+            children: [
+              Icon(icon, size: 19, color: colors.sub),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(label,
+                    style: sans(size: 14, color: colors.sub)),
+              ),
+              if (badge > 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF3DEBA8),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text('$badge',
+                      style: sans(
+                          size: 11,
+                          weight: FontWeight.w700,
+                          color: const Color(0xFF0B0D14))),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -510,6 +591,13 @@ class _TopBar extends StatelessWidget {
                 ),
               ),
               _iconBtn(
+                icon: Icons.auto_awesome,
+                active: false,
+                colors: colors,
+                onTap: () => openAssistant(context),
+              ),
+              const SizedBox(width: 8),
+              _iconBtn(
                 icon: Icons.account_balance_wallet_outlined,
                 active: accountsActive,
                 colors: colors,
@@ -640,6 +728,32 @@ class _ProfileMenu extends StatelessWidget {
         ),
         const PopupMenuDivider(),
         PopupMenuItem<String>(
+          value: 'inbox',
+          child: Row(
+            children: [
+              Icon(Icons.inbox_outlined, size: 16, color: colors.text),
+              const SizedBox(width: 10),
+              Text('Review inbox', style: sans(size: 13, color: colors.text)),
+              if (SmsInbox.instance.pendingCount > 0) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF3DEBA8),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text('${SmsInbox.instance.pendingCount}',
+                      style: sans(
+                          size: 10,
+                          weight: FontWeight.w700,
+                          color: const Color(0xFF0B0D14))),
+                ),
+              ],
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
           value: 'settings',
           child: Row(
             children: [
@@ -664,6 +778,7 @@ class _ProfileMenu extends StatelessWidget {
       onSelected: (v) {
         if (v == 'signout') auth.signOut();
         if (v == 'settings') openSettings(context);
+        if (v == 'inbox') openSmsReview(context);
       },
       child: compact
           ? Icon(Icons.more_horiz, size: 20, color: colors.sub)

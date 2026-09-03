@@ -2,18 +2,20 @@ import 'package:another_telephony/telephony.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/app_transaction.dart';
+import '../models/sms_suggestion.dart';
 import '../state/app_state.dart';
-import '../utils/formatters.dart';
-import 'sms_parser.dart';
+import 'sms_inbox.dart';
 
-/// Auto-imports bank debit/credit SMS into transactions (Android only).
+/// Watches for bank SMS and feeds them to [SmsInbox] for review
+/// (Android only).
 ///
-/// A parsed SMS posts only when it matches a known template **and** its tail
-/// maps to exactly one account's `smsIds` — the confidence guard the user asked
-/// for. Listens live while the app runs and scans the recent inbox on start to
-/// catch messages that arrived while it was closed. Background (app killed)
-/// delivery is intentionally out of scope (it needs a Firebase-enabled isolate).
+/// Listens live while the app runs and scans the last two days of inbox on
+/// start, to catch what arrived while it was closed. Background (app killed)
+/// delivery is intentionally out of scope: it needs a Firebase-enabled
+/// isolate.
+///
+/// Nothing here writes a transaction. Messages become suggestions the user
+/// approves — see [SmsInbox].
 class SmsService {
   SmsService._();
   static final SmsService instance = SmsService._();
@@ -80,7 +82,8 @@ class SmsService {
   }
 
   void _onIncoming(SmsMessage message) {
-    _process(message.body ?? '', DateTime.now());
+    _process(message.body ?? '', DateTime.now(),
+        sender: message.address ?? '');
   }
 
   Future<void> _scanRecent() async {
@@ -94,39 +97,28 @@ class SmsService {
             ? DateTime.fromMillisecondsSinceEpoch(m.date!)
             : DateTime.now();
         if (when.isBefore(cutoff)) continue;
-        await _process(m.body ?? '', when);
+        await _process(m.body ?? '', when, sender: m.address ?? '');
       }
     } catch (_) {}
   }
 
-  Future<void> _process(String body, DateTime when) async {
+  /// Hand the message to [SmsInbox] as a suggestion to review.
+  ///
+  /// This used to write a transaction outright, and only when regex matched
+  /// *and* the card tail mapped to exactly one account. That guard kept bad
+  /// data out, but it also silently dropped every message with an
+  /// unrecognised merchant or an ambiguous tail — most of them. Queueing
+  /// instead means nothing is written without a tap, so a message worth
+  /// showing no longer has to clear the bar for writing.
+  Future<void> _process(String body, DateTime when, {String sender = ''}) async {
     final app = _app;
     if (app == null) return;
-    final parsed = SmsParser.parse(body);
-    if (parsed == null) return;
 
-    final matches =
-        app.accounts.where((a) => a.smsIds.contains(parsed.tail)).toList();
-    if (matches.length != 1) return; // confidence guard
-    final account = matches.first;
-
-    final sig = (body.hashCode & 0x7fffffff).toString();
+    final sig = SmsSuggestion.signatureOf(body);
     if (await _seen(sig)) return;
 
-    final tx = AppTransaction(
-      id: '',
-      date: dateKeyOf(when),
-      type: parsed.isDebit ? 'expense' : 'income',
-      accountId: account.id,
-      toAccountId: null,
-      category: SmsParser.guessCategory(parsed.merchant, parsed.isDebit),
-      note: parsed.merchant.isNotEmpty ? parsed.merchant : 'Bank SMS',
-      amount: parsed.amount,
-      status: 'received',
-      recurringId: null,
-    );
     try {
-      await app.addTransaction(tx);
+      await SmsInbox.instance.ingest(body, when, app, sender: sender);
       await _markSeen(sig);
     } catch (_) {}
   }
