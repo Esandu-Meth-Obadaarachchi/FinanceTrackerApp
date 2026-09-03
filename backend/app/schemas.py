@@ -28,11 +28,24 @@ class AgentRequest(BaseModel):
     # none of it.
     snapshot: dict[str, Any] = Field(default_factory=dict)
     history: list[ChatMessage] = Field(default_factory=list)
+    # Echoed back from the previous response. Carries the agent's unfinished
+    # intent across a clarification, which chat history alone cannot.
+    state: dict[str, Any] = Field(default_factory=dict)
     today: str = ""
 
 
 class AgentResponse(BaseModel):
+    """One turn's outcome.
+
+    `kind` says which shape this is: an answer to show, a question to ask
+    back, or a write proposal to confirm.
+    """
+
+    kind: str = "answer"  # answer | question | proposal
     answer: str
     provider: str
     tool_calls: list[dict[str, Any]]
     iterations: int
+    question: dict[str, Any] | None = None
+    proposal: dict[str, Any] | None = None
+    state: dict[str, Any] = Field(default_factory=dict)

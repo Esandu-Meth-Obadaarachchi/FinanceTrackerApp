@@ -152,6 +152,7 @@ def _query_transactions(snapshot: dict[str, Any], args: dict[str, Any]) -> Any:
     rows.sort(key=lambda t: t.get("date", ""), reverse=True)
     trimmed = [
         {
+            "id": t.get("id"),
             "date": t.get("date"),
             "type": t.get("type"),
             "category": t.get("category"),

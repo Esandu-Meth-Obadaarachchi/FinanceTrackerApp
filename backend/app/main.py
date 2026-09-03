@@ -113,20 +113,29 @@ async def parse_sms_endpoint(
 async def agent_endpoint(
     req: AgentRequest, router: ProviderRouter = Depends(get_router)
 ) -> AgentResponse:
-    """Ask a question about your own money. The agent calls tools to answer."""
+    """Ask about your money, or tell it to record something.
+
+    Replies with an answer, a question back, or a write proposal to confirm.
+    Nothing is ever written here — the client applies a proposal itself.
+    """
     try:
         reply = await run_agent(
             router,
             question=req.question,
             snapshot=req.snapshot,
             history=[m.model_dump() for m in req.history],
+            state=req.state,
             today=_today(req.today),
         )
     except ProviderError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return AgentResponse(
+        kind=reply.kind,
         answer=reply.answer,
         provider=reply.provider,
         tool_calls=reply.tool_calls,
         iterations=reply.iterations,
+        question=reply.question,
+        proposal=reply.proposal,
+        state=reply.state,
     )
