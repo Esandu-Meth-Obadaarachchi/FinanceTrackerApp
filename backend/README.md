@@ -141,50 +141,84 @@ transactions come back `understood: false`.
 
 ### `POST /agent/ask`
 
-A question about your own money, answered by calling tools over a snapshot
-you upload with the question.
+Ask about your money, or tell it to record something. Replies one of three
+ways, told apart by `kind`.
 
 ```bash
 curl -s -X POST http://127.0.0.1:8099/agent/ask \
   -H 'content-type: application/json' \
   -d '{
-    "question": "how much did I spend on fuel in August and am I over budget?",
+    "question": "how much did I spend on fuel in August?",
     "today": "2026-09-03",
-    "snapshot": {
-      "accounts": [{"id":"a2","name":"Sampath","type":"bank","balance":85000}],
-      "transactions": [
-        {"date":"2026-08-02","type":"expense","category":"Fuel","note":"IOC",
-         "amount":8000,"status":"received","accountId":"a2"},
-        {"date":"2026-08-11","type":"expense","category":"Fuel","note":"IOC",
-         "amount":6500,"status":"received","accountId":"a2"}
-      ],
-      "loans": [],
-      "budget": {"month":"2026-08","plannedIncome":120000,
-                 "allocations":{"Fuel":15000}}
-    }
+    "snapshot": { "accounts": [...], "transactions": [...] }
   }'
 ```
 
+**`kind: "answer"`** — a reply to show.
+
 ```json
 {
-  "answer": "You spent Rs 14,500 on fuel in August. You're within budget by Rs 500, so no, you're not over. Your budget for fuel that month was Rs 15,000.",
-  "provider": "anthropic",
-  "tool_calls": [
-    {"tool": "query_transactions",
-     "arguments": {"category":"fuel","start_date":"2026-08-01",
-                   "end_date":"2026-08-31","type":"expense"}},
-    {"tool": "get_budget", "arguments": {}}
-  ],
+  "kind": "answer",
+  "answer": "Rs 14,500 on fuel in August, across 2 transactions.",
+  "provider": "gemini",
+  "tool_calls": [{"tool": "aggregate_spending", "arguments": {...}}],
   "iterations": 2
 }
 ```
 
-`tool_calls` is returned so the client can show its working. The Flutter app
-renders these as chips under each answer — with money, seeing *how* it got
-there matters more than the reply sounding sure of itself.
+**`kind: "question"`** — it needs something before it answers. Render the
+options as tappable chips and send the chosen one as the next `question`,
+**echoing `state` back unchanged**.
 
-Optional `history` carries prior turns as `[{"role":"user","content":"…"}]`.
-The snapshot is **not** persisted, so send it with every question.
+```json
+{
+  "kind": "question",
+  "answer": "Which period for your income?",
+  "question": {
+    "text": "Which period for your income?",
+    "options": ["This month", "Last month", "This year"],
+    "field": "period"
+  },
+  "state": {"pending": {"asked": "Which period for your income?", "collected": {}}}
+}
+```
+
+**`kind: "proposal"`** — it wants to write. **Nothing has been saved.**
+Render a confirmation card; on Apply, the client performs the write itself.
+
+```json
+{
+  "kind": "proposal",
+  "answer": "Check these details and tap Apply if they look right.",
+  "proposal": {
+    "id": "prop_a1b2c3d4e5f6",
+    "kind": "add_transaction",
+    "fields": {"type": "expense", "amount": 2500, "category": "Fuel",
+               "note": "Fuel", "date": "2026-09-03",
+               "accountId": "a2", "status": "received"},
+    "summary": "Rs 2,500 · Fuel · Sampath · 2026-09-03",
+    "warnings": []
+  }
+}
+```
+
+`proposal.kind` is `add_transaction`, `edit_transaction` or
+`delete_transaction`. Edits and deletes carry `target_id` plus `before`, so
+the card shows what is being replaced or removed; edits also carry `changes`
+as readable lines. `id` is unique per proposal — track applied ones so a
+double tap cannot write twice.
+
+| Field | Notes |
+|---|---|
+| `question` | Required, 1–1000 chars |
+| `snapshot` | The client's data. Not persisted, so send it every time |
+| `history` | Prior turns, `[{"role","content"}]` |
+| `state` | Echo back verbatim from the previous reply |
+| `today` | `YYYY-MM-DD` |
+
+The loop runs at most **3 read iterations**. `ask_user` and the `propose_*`
+tools end the turn immediately, so a question or a write costs one model
+call rather than spending the budget.
 
 The snapshot schema is documented in [docs/AI.md](docs/AI.md#the-snapshot).
 

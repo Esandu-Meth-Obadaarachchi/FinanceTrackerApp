@@ -246,50 +246,81 @@ raw rows would be inviting it to get it wrong.
 
 ### The agent loop
 
+A turn ends one of four ways. Reading continues the loop; the other three
+stop it dead.
+
 ```
-question + snapshot
+question + snapshot + state
         │
         ▼
    ┌─────────────────────────────────┐
    │ model sees the question and     │◄──────────────┐
-   │ the six tool schemas            │               │
+   │ all ten tool schemas            │               │
    └────────────┬────────────────────┘               │
                 │                                    │
-        wants tools?                                 │
-         │           │                               │
-       yes           no ──────► final answer         │
-         │                                           │
-         ▼                                           │
-   run each tool over the snapshot                   │
-   (pure Python, no network)                         │
-         │                                           │
-         └────► append results to the conversation ──┘
+     what did it call?                               │
+        │                                            │
+        ├── read tools ──► run over snapshot ────────┘
+        │                  (pure Python, no network)
+        │
+        ├── ask_user   ──► STOP · return a question
+        ├── propose_*  ──► STOP · return a draft to confirm
+        └── nothing    ──► STOP · return the answer
 
-   after 6 iterations: ask once more with no tools offered
+   after 3 read iterations: one more call, no tools offered
 ```
 
 Tools run **server-side over the uploaded snapshot**, not on the client.
 There is no round trip to the device per tool call, so a question needing
 three tools is still one HTTP request.
 
-`MAX_ITERATIONS = 6` bounds the loop. Hitting it is not an error — the final
-request drops the tools and asks for an answer from what was already
-gathered, so a complex question degrades to a partial answer rather than an
-exception.
+**`MAX_ITERATIONS = 3`, and only reading spends it.** That is what makes so
+tight a budget workable. A write costs one model call and a clarification
+costs one, because the terminal tools end the turn the moment they are
+called rather than burning iterations on turns that were never going to
+fetch anything. Typical costs:
 
-### The six tools
+| Interaction | Model calls |
+|---|---|
+| "3500 lunch at odel" | 1 → proposal |
+| "What is my income?" | 1 → question |
+| "How much on fuel in August?" | 2 → fetch, answer |
+| "Change that 8000 to 8500" | 2 → find it, propose |
 
-All in `services/tools.py`. Each is a pure function of
-`(snapshot, arguments)`.
+Hitting the bound is not an error. The final request drops the tools and
+asks for an answer from what was already gathered, so a hard question
+degrades to a partial answer rather than an exception.
+
+The prompt also pushes for **parallel tool calls** — everything needed in
+one turn rather than fetch, think, fetch. With three iterations, breadth has
+to be free; only genuine sequential dependency should cost a turn.
+
+### The tools
+
+Six read tools in `services/tools.py`, each a pure function of
+`(snapshot, arguments)`:
 
 | Tool | Answers |
 |---|---|
-| `query_transactions` | "What did I spend at X?" — filters by date, type, category, account, note, status. Caps at 50 rows, newest first |
+| `query_transactions` | "What did I spend at X?" — filters by date, type, category, account, note, status. Returns row **ids**. Caps at 50, newest first |
 | `aggregate_spending` | "How much on fuel?" — totals grouped by category, month, account or type |
 | `get_accounts` | Balances, and the total across all accounts |
 | `get_loans` | Lent and borrowed, with outstanding per loan |
 | `get_pending_income` | Invoiced but not yet received |
 | `get_budget` | Plan versus actual spend per category |
+
+Four terminal tools in `services/actions.py`, which stop the loop:
+
+| Tool | Effect |
+|---|---|
+| `ask_user` | Returns a question with 2–4 tappable options |
+| `propose_add_transaction` | Returns a draft to confirm |
+| `propose_edit_transaction` | Returns a field-by-field before and after |
+| `propose_delete_transaction` | Returns what would be removed |
+
+`query_transactions` returns ids specifically so edit and delete can address
+a row, and the prompt tells the model never to invent one. A proposal
+naming an id absent from the snapshot is refused.
 
 Two rules encoded in the tools rather than the prompt:
 
@@ -315,7 +346,92 @@ never needs to ask.
 
 ---
 
-## 5. Structured output for parsing
+## 5. Writing, and asking questions back
+
+### The agent cannot write, by construction
+
+The backend holds no database credentials. A `propose_*` tool validates and
+normalises a draft and hands it back; the client shows it and, on Apply,
+executes it through the app's own `AppState` methods.
+
+That makes "confirm before saving" **structural rather than a policy**. There
+is no code path where an AI-originated write reaches Firestore without a tap,
+because the process that talks to the model has nothing to write with.
+
+It also means an AI write goes through the exact same methods as a
+hand-typed one, so every money rule the app owns still applies. The agent
+gets no privileged path around them.
+
+### Validation refuses, and the refusal goes to the model
+
+A rejected draft is returned as a **tool result the model reads**, not an
+error the user sees:
+
+```python
+turns.append(Turn(role="tool", tool_results=[ToolResult(..., is_error=True)]))
+continue
+```
+
+So "Petrol is not a category in this app, here are the real ones" becomes a
+correction the model makes silently within the same turn.
+
+One refusal worth explaining. A negative amount is rejected rather than
+`abs()`-ed, which is what the parsing path does. Direction lives in `type`,
+so a negative amount means the model is confused about direction — and
+silently flipping the sign would turn `income -1200` into income of **+1200**,
+the exact opposite of the intent. Refusing costs one retry and surfaces the
+confusion instead of burying it.
+
+Deleting an entry that settles a loan or splits a pending income returns a
+warning, because removing it unwinds a derived rule elsewhere in the app that
+is not visible from the row itself.
+
+### When to ask, and when not to
+
+`ask_user` is a real tool. Letting the model phrase a question in prose and
+detecting it cannot distinguish "Which month?" from a rhetorical flourish; an
+explicit tool is unambiguous and behaves identically on both providers.
+
+The risk is over-asking. An assistant that interrogates you is worse than one
+that assumes, and friction is what this whole feature set exists to kill. The
+governing rule:
+
+> Ask only when you can offer 2–4 concrete tappable options. If you cannot
+> enumerate options, assume the most likely reading, state it in one clause,
+> and answer anyway.
+
+Options are what make asking acceptable — one tap, not typing. Two cases are
+called out as *must ask*, because assuming there is a wrong number rather
+than a slightly different one:
+
+1. **A total with no time period.** "What is my income?" has different
+   answers for this month, last month and this year.
+2. **Which account**, when the user holds several. The model calls
+   `get_accounts` first so the options are their real account names.
+
+The first version of the prompt had only the general rule, and "what's my
+income" was answered with an all-time total instead of a question. Naming the
+two cases explicitly fixed it.
+
+### Context across a clarification
+
+Chat history alone is not enough. When the agent asks something and the user
+replies "this month", the model has to reconstruct **its own half-finished
+intent** from prose, which is where these loops break.
+
+So a clarification returns an explicit state object the client echoes back
+untouched:
+
+```json
+"state": { "pending": { "asked": "Which period?", "collected": {...} } }
+```
+
+The backend stays stateless — the device is the memory — and the resumed turn
+restates the intent in the system prompt rather than hoping it is inferable.
+
+---
+
+## 6. Structured output for parsing
 
 Parsing does not use tools. It asks for a JSON object matching a fixed
 schema, so the client gets fields it can drop straight into its existing
@@ -351,7 +467,7 @@ a crash or a wrong entry.
 
 ---
 
-## 6. Rules that hold across all of it
+## 7. Rules that hold across all of it
 
 **Nothing AI-generated is ever saved without confirmation.** Parsing returns
 drafts. The SMS inbox queues suggestions. Neither writes a transaction. With
@@ -373,10 +489,12 @@ when it is off or unreachable.
 
 ---
 
-## 7. Known gaps
+## 8. Known gaps
 
 - **`/parse/text` handles transactions only.** "lent nimal 10k" comes back as
   an expense, not a loan. Loan and pending-income intents are not modelled.
+- **The agent writes transactions only.** It cannot create or settle a loan,
+  or receive a pending income. Those go through the app's own sheets.
 - **No prompt caching.** The category list and tool schemas are resent every
   request. Worth adding if agent usage grows.
 - **The snapshot is sent whole.** Fine at a few hundred transactions; a user
