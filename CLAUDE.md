@@ -450,6 +450,12 @@ the bank-SMS review inbox, the local category memory, and the assistant. It
 exists because a Flutter web bundle is fully inspectable and so cannot hold
 an API key.
 
+> **Full documentation:** [`backend/README.md`](backend/README.md) covers
+> running the service, every endpoint with worked examples, configuration and
+> troubleshooting. [`backend/docs/AI.md`](backend/docs/AI.md) covers the AI
+> design — the layering, the provider fallback, the RAG and agent loop, and
+> why there is no vector store. The summary below is the short version.
+
 **Providers.** `gemini-3.6-flash` handles every request, with
 `claude-haiku-4-5` as the fallback. The fallback fires on **any** primary
 failure, including a 400 — the two vendors validate differently (Gemini 3.x
