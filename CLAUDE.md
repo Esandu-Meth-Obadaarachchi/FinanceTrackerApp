@@ -43,6 +43,9 @@ lib/
     loan_math.dart         — pure balance/loan-settlement math (no Firestore),
                               so the money rules stay unit-testable
     income_math.dart       — pure split math for part-paying a pending income
+    category_memory.dart   — learns text/merchant -> category; stays quiet
+                              when unsure (pure, unit-tested)
+    sms_suggestion.dart    — a reviewable bank-SMS transaction + its blocker
   data/categories.dart     — Income/Expense categories + colour map + AccountColors
   services/
     auth_service.dart      — Email/password + Google sign-in, friendly errors
@@ -56,7 +59,12 @@ lib/
     messaging_service.dart  — FCM: subscribe `all` + per-uid topics, foreground
                               messages shown via notification_service
     sms_parser.dart         — pure-Dart bank-SMS regex parser + category guess
-    sms_service.dart        — Android SMS listener + inbox scan -> addTransaction
+    sms_service.dart        — Android SMS listener + inbox scan -> SmsInbox
+    sms_inbox.dart          — queues bank-SMS suggestions for review; layers
+                              memory -> AI -> rules; approving writes the tx
+                              and teaches the memory
+    ai_service.dart         — client for backend/; builds the agent snapshot
+    category_memory_service.dart — persists CategoryMemory to prefs
   state/app_state.dart     — ChangeNotifier; subscribes to 6 Firestore streams
                               (accounts, transactions, loans, recurring, budgets,
                               reminders — last two outside the load gate), exposes
@@ -86,6 +94,8 @@ lib/
     budget_screen.dart     — zero-based / envelope planner with category line
                               items + monthly carry-over (openBudgetPlanner)
     reminders_screen.dart  — custom due-payment reminders (openReminders)
+    sms_review_screen.dart — bank-SMS review inbox (openSmsReview)
+    assistant_screen.dart  — agentic Q&A over your own data (openAssistant)
     recurring_screen.dart  — manage fixed monthly automations (openRecurringManager)
     settings_screen.dart   — display, appearance, daily reminders, payment
                               reminders entry, bank-SMS toggle, version,
@@ -432,6 +442,82 @@ is reached from **Settings → Danger Zone → Reset all data** behind a
 confirmation dialog. After the wipe the live streams emit empty, which also
 cancels any scheduled reminder notifications via `ReminderScheduler.syncAll`.
 Local prefs (theme, daily-reminder times, SMS dedupe set) are **not** touched.
+
+## AI features and the `backend/` service
+
+Three features share one FastAPI service in [`backend/`](backend/README.md):
+the bank-SMS review inbox, the local category memory, and the assistant. It
+exists because a Flutter web bundle is fully inspectable and so cannot hold
+an API key.
+
+**Providers.** `gemini-3.6-flash` handles every request, with
+`claude-haiku-4-5` as the fallback. The fallback fires on **any** primary
+failure, including a 400 — the two vendors validate differently (Gemini 3.x
+rejects tool histories missing a `thoughtSignature`, which Claude has no
+concept of), so "4xx means the next provider will fail too" is wrong here.
+`response.provider` says who answered.
+
+Two Gemini quirks are handled in `providers/gemini.py` and worth knowing
+before touching it: Flash 3.x **always** thinks (`thinkingBudget: 0` is
+rejected) and those tokens come out of `maxOutputTokens`, so a tight budget
+returns `MAX_TOKENS` with empty content; and its function calls carry a
+`thoughtSignature` that must be echoed back or the next turn 400s.
+
+### Everything is layered cheapest-first
+
+The ordering is the design, not an optimisation:
+
+1. **Local memory** ([`models/category_memory.dart`](lib/models/category_memory.dart))
+   — instant, free, offline, and correct for anything seen before.
+2. **Regex** ([`services/sms_parser.dart`](lib/services/sms_parser.dart)) —
+   amount and direction out of a bank SMS.
+3. **The model** — only for text nothing local recognises.
+
+`CategoryMemory` refuses to answer when its top two categories are close.
+A confident wrong suggestion is worse than silence: the user stops trusting
+the fill-in and checks every field by hand, which is the friction the
+feature exists to remove.
+
+### The review inbox replaced auto-import
+
+`SmsService` no longer writes transactions. It feeds
+[`SmsInbox`](lib/services/sms_inbox.dart), which queues suggestions the user
+approves.
+
+The old guard posted only when regex matched **and** the tail mapped to
+exactly one account, and dropped everything else silently. That one rule was
+doing two jobs — keeping bad data out, and choosing what to show — and did
+the second badly. Because nothing is written without a tap now, the bar for
+showing something is only "probably useful". Approving teaches the memory,
+so the same merchant costs nothing next time.
+
+Suggestions live in SharedPreferences, not Firestore: a queue of unreviewed
+guesses is per-device working state. The approved transaction is the only
+thing worth syncing.
+
+### The assistant is agentic, and stateless server-side
+
+The client posts a snapshot of its own data with each question
+(`AiService.buildSnapshot`), with balances and loan outstandings already
+computed so the model never re-derives money rules the app owns. Tools in
+`backend/app/services/tools.py` filter and aggregate that snapshot, so the
+backend needs **no Firestore credentials** and retains nothing.
+
+Tools are pure functions of `(snapshot, arguments)`, which is what makes
+them testable without a model or a network.
+
+### Rules that matter here
+
+- **Nothing AI-generated is ever saved without confirmation.** Parsing
+  returns drafts. One wrong silent write costs more trust than a hundred
+  right ones earn.
+- **`confidence` below 0.6** means the model guessed: open the sheet rather
+  than offering one-tap approve.
+- **AI is off by default**, configured in Settings. Without a reachable
+  backend every AI path would sit on a timeout.
+- **Secrets live in `backend/.env`**, which is gitignored. Set
+  `APP_SHARED_KEY` before hosting or the endpoint is an open proxy onto paid
+  credits.
 
 ## Firebase project
 
