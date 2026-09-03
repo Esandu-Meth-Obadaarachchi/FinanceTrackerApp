@@ -43,7 +43,7 @@ Both providers should read `true`. Interactive docs are at
 `http://127.0.0.1:8099/docs`.
 
 ```bash
-.venv/bin/python -m pytest        # 27 tests, no network, no API keys needed
+.venv/bin/python -m pytest        # 54 tests, no network, no API keys needed
 ```
 
 > **Python version.** `requirements.txt` uses floors rather than exact pins
@@ -69,10 +69,12 @@ backend/
     services/
       parsing.py                Text and SMS to structured transactions
       agent.py                  The agentic loop
-      tools.py                  The six tools, pure functions
+      tools.py                  Six read tools, pure functions
+      actions.py                ask_user + the propose_* write tools
   tests/
     test_tools.py               Tool filtering and totalling (19 tests)
     test_router.py              Fallback behaviour, with fakes (8 tests)
+    test_actions.py             Proposal validation (27 tests)
   docs/AI.md                    How the AI works
 ```
 
