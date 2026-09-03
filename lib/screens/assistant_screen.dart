@@ -22,11 +22,25 @@ void openAssistant(BuildContext context) {
 }
 
 class _Message {
-  _Message(this.role, this.text, {this.tools = const [], this.provider = ''});
+  _Message(
+    this.role,
+    this.text, {
+    this.tools = const [],
+    this.provider = '',
+    this.question,
+    this.proposal,
+  });
+
   final String role; // user | assistant
   final String text;
   final List<String> tools;
   final String provider;
+
+  /// Set when the agent asked something back.
+  final AgentQuestion? question;
+
+  /// Set when the agent wants to write. Nothing is saved until Apply.
+  final AgentProposal? proposal;
 }
 
 /// Ask questions about your own money.
@@ -47,6 +61,17 @@ class _AssistantScreenState extends State<AssistantScreen> {
   final _scroll = ScrollController();
   final List<_Message> _messages = [];
   bool _busy = false;
+
+  /// Echoed straight back to the backend each turn. Carries the agent's
+  /// unfinished intent across a clarification.
+  Map<String, dynamic> _state = const {};
+
+  /// Proposals already applied, so a second tap cannot write twice.
+  final Set<String> _applied = {};
+
+  /// Proposals the user waved away. Kept apart from [_applied] so a cancelled
+  /// card never claims it saved something.
+  final Set<String> _dismissed = {};
 
   static const _starters = [
     'How much did I spend on food this month?',
@@ -81,11 +106,19 @@ class _AssistantScreenState extends State<AssistantScreen> {
         for (final m in _messages.take(_messages.length - 1))
           (role: m.role, content: m.text),
       ];
-      final reply = await AiService.instance.ask(question, app, history: history);
+      final reply = await AiService.instance
+          .ask(question, app, history: history, state: _state);
       if (!mounted) return;
       setState(() {
-        _messages.add(_Message('assistant', reply.answer,
-            tools: reply.toolCalls, provider: reply.provider));
+        _state = reply.state;
+        _messages.add(_Message(
+          'assistant',
+          reply.answer,
+          tools: reply.toolCalls,
+          provider: reply.provider,
+          question: reply.question,
+          proposal: reply.proposal,
+        ));
       });
     } catch (e) {
       if (!mounted) return;
@@ -194,6 +227,24 @@ class _AssistantScreenState extends State<AssistantScreen> {
     );
   }
 
+  Future<void> _apply(AgentProposal p) async {
+    if (_applied.contains(p.id)) return;
+    final app = context.read<AppState>();
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _applied.add(p.id));
+    try {
+      await AiService.applyProposal(p, app);
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(
+          content: Text(p.isDelete ? 'Deleted' : 'Saved')));
+    } catch (e) {
+      if (!mounted) return;
+      // Let them try again — the failure was not their doing.
+      setState(() => _applied.remove(p.id));
+      messenger.showSnackBar(SnackBar(content: Text('Could not save: $e')));
+    }
+  }
+
   Widget _bubble(_Message m, Palette colors) {
     final isUser = m.role == 'user';
     return Align(
@@ -215,6 +266,36 @@ class _AssistantScreenState extends State<AssistantScreen> {
           children: [
             Text(m.text,
                 style: sans(size: 14, color: colors.text, height: 1.45)),
+            if (m.question != null && m.question!.options.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final o in m.question!.options)
+                    GestureDetector(
+                      onTap: _busy ? null : () => _send(o),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 7),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF3DEBA8).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(o,
+                            style: sans(
+                                size: 12.5,
+                                weight: FontWeight.w600,
+                                color: const Color(0xFF3DEBA8))),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+            if (m.proposal != null) ...[
+              const SizedBox(height: 12),
+              _proposalCard(m.proposal!, colors),
+            ],
             if (m.tools.isNotEmpty) ...[
               const SizedBox(height: 8),
               Wrap(
@@ -237,6 +318,150 @@ class _AssistantScreenState extends State<AssistantScreen> {
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  /// The confirmation card. Nothing has been written when this appears.
+  ///
+  /// An edit or a delete shows what is being replaced or removed, not only
+  /// what it becomes: the risk with those is not the write itself but
+  /// approving one without seeing what it overwrites.
+  Widget _proposalCard(AgentProposal p, Palette colors) {
+    final done = _applied.contains(p.id);
+    final cancelled = _dismissed.contains(p.id);
+    final tone = p.isDelete ? const Color(0xFFFF5C7A) : const Color(0xFF3DEBA8);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colors.elevated,
+        border: Border.all(color: tone.withValues(alpha: 0.35)),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                p.isDelete
+                    ? Icons.delete_outline
+                    : p.isEdit
+                        ? Icons.edit_outlined
+                        : Icons.add_circle_outline,
+                size: 15,
+                color: tone,
+              ),
+              const SizedBox(width: 7),
+              Text(
+                p.isDelete
+                    ? 'Delete this entry?'
+                    : p.isEdit
+                        ? 'Change this entry?'
+                        : 'Add this entry?',
+                style: sans(
+                    size: 13, weight: FontWeight.w700, color: colors.text),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          if (p.isEdit && p.changes.isNotEmpty)
+            for (final c in p.changes)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(c,
+                    style: mono(size: 12.5, color: colors.text)),
+              )
+          else
+            Text(p.summary,
+                style: mono(
+                    size: 13.5, weight: FontWeight.w700, color: colors.text)),
+
+          if (p.isDelete && p.before.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              '${p.before['note'] ?? ''} · ${p.before['category'] ?? ''}',
+              style: sans(size: 12, color: colors.sub),
+            ),
+          ],
+
+          for (final w in p.warnings) ...[
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.warning_amber_rounded,
+                    size: 13, color: Color(0xFFFFB547)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(w,
+                      style:
+                          sans(size: 11.5, color: const Color(0xFFFFB547))),
+                ),
+              ],
+            ),
+          ],
+
+          const SizedBox(height: 12),
+          if (cancelled)
+            Row(
+              children: [
+                Icon(Icons.close, size: 15, color: colors.sub),
+                const SizedBox(width: 7),
+                Text('Cancelled', style: sans(size: 13, color: colors.sub)),
+              ],
+            )
+          else if (done)
+            Row(
+              children: [
+                Icon(Icons.check_circle, size: 15, color: tone),
+                const SizedBox(width: 7),
+                Text(p.isDelete ? 'Deleted' : 'Saved',
+                    style: sans(
+                        size: 13, weight: FontWeight.w600, color: tone)),
+              ],
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => _apply(p),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        color: tone.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Center(
+                        child: Text(p.actionLabel,
+                            style: sans(
+                                size: 13,
+                                weight: FontWeight.w700,
+                                color: tone)),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: () => setState(() => _dismissed.add(p.id)),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: colors.inputBg,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text('Cancel',
+                        style: sans(size: 13, color: colors.sub)),
+                  ),
+                ),
+              ],
+            ),
+        ],
       ),
     );
   }

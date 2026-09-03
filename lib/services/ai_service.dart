@@ -148,14 +148,20 @@ class AiService {
     return ParsedEntry.fromJson(json);
   }
 
-  /// Ask a question about your own money.
+  /// Ask about your money, or tell it to record something.
   ///
   /// The snapshot travels with the question and the backend keeps none of
   /// it, so nothing about the user's finances is stored off-device.
+  ///
+  /// [state] is echoed straight back from the previous reply. It carries the
+  /// agent's unfinished intent across a clarification, which chat history
+  /// alone cannot — without it the model has to re-infer from prose what it
+  /// was halfway through doing.
   Future<AgentAnswer> ask(
     String question,
     AppState app, {
     List<({String role, String content})> history = const [],
+    Map<String, dynamic> state = const {},
   }) async {
     if (!enabled) throw AiFailure('The assistant is switched off in Settings.');
     final json = await _post(
@@ -167,17 +173,55 @@ class AiService {
         'history': [
           for (final m in history) {'role': m.role, 'content': m.content},
         ],
+        'state': state,
       },
       timeout: const Duration(seconds: 120),
     );
-    return AgentAnswer(
-      answer: json['answer'] as String? ?? '',
-      provider: json['provider'] as String? ?? '',
-      toolCalls: [
-        for (final c in (json['tool_calls'] as List? ?? []))
-          (c as Map)['tool'] as String? ?? '',
-      ],
-    );
+    return AgentAnswer.fromJson(json);
+  }
+
+  /// Carry out a proposal the user approved.
+  ///
+  /// Everything goes through [AppState], which owns the money rules, so an
+  /// AI-originated write behaves exactly like one typed by hand. There is no
+  /// separate path it could take to bypass them.
+  static Future<void> applyProposal(AgentProposal p, AppState app) async {
+    switch (p.kind) {
+      case 'add_transaction':
+        await app.addTransaction(AppTransaction(
+          id: '',
+          date: p.fields['date'] as String? ?? _todayKey(),
+          type: p.fields['type'] as String? ?? 'expense',
+          accountId: p.fields['accountId'] as String? ?? '',
+          category: p.fields['category'] as String? ?? '',
+          note: p.fields['note'] as String? ?? '',
+          amount: (p.fields['amount'] as num?)?.toDouble() ?? 0,
+          status: p.fields['status'] as String? ?? 'received',
+        ));
+      case 'edit_transaction':
+        final existing = app.transactions.firstWhere(
+          (t) => t.id == p.targetId,
+          orElse: () => throw AiFailure('That entry no longer exists.'),
+        );
+        await app.updateTransaction(AppTransaction(
+          id: existing.id,
+          date: p.fields['date'] as String? ?? existing.date,
+          type: existing.type,
+          accountId: p.fields['accountId'] as String? ?? existing.accountId,
+          toAccountId: existing.toAccountId,
+          category: p.fields['category'] as String? ?? existing.category,
+          note: p.fields['note'] as String? ?? existing.note,
+          amount: (p.fields['amount'] as num?)?.toDouble() ?? existing.amount,
+          status: p.fields['status'] as String? ?? existing.status,
+          recurringId: existing.recurringId,
+          loanId: existing.loanId,
+          parentId: existing.parentId,
+        ));
+      case 'delete_transaction':
+        await app.deleteTransaction(p.targetId);
+      default:
+        throw AiFailure('Unknown action: ${p.kind}');
+    }
   }
 
   /// The financial picture the agent reasons over.
@@ -197,6 +241,9 @@ class AiService {
         'transactions': [
           for (final t in app.transactions)
             {
+              // Ids travel so the agent can propose edits and deletions
+              // against a specific row rather than describing one.
+              'id': t.id,
               'date': t.date,
               'type': t.type,
               'category': t.category,
@@ -204,11 +251,17 @@ class AiService {
               'amount': t.amount,
               'status': t.status,
               'accountId': t.accountId,
+              // Deleting one of these unwinds a derived rule elsewhere, so
+              // the backend warns about it on the confirmation card.
+              if (t.loanId != null) 'loanId': t.loanId,
+              if (t.parentId != null) 'parentId': t.parentId,
+              if (t.recurringId != null) 'recurringId': t.recurringId,
             },
         ],
         'loans': [
           for (final l in app.loans)
             {
+              'id': l.id,
               'who': l.who,
               'loanType': l.loanType,
               'amount': l.amount,
@@ -298,14 +351,120 @@ class ParsedEntry {
       );
 }
 
+/// One turn from the agent: an answer, a question back, or a write to confirm.
 class AgentAnswer {
   const AgentAnswer({
+    required this.kind,
     required this.answer,
     required this.provider,
     this.toolCalls = const [],
+    this.question,
+    this.proposal,
+    this.state = const {},
   });
 
+  /// "answer", "question" or "proposal".
+  final String kind;
   final String answer;
   final String provider;
   final List<String> toolCalls;
+
+  final AgentQuestion? question;
+  final AgentProposal? proposal;
+
+  /// Opaque. The client stores it and sends it back untouched next turn.
+  final Map<String, dynamic> state;
+
+  bool get isQuestion => kind == 'question' && question != null;
+  bool get isProposal => kind == 'proposal' && proposal != null;
+
+  factory AgentAnswer.fromJson(Map<String, dynamic> json) {
+    final q = json['question'] as Map<String, dynamic>?;
+    final p = json['proposal'] as Map<String, dynamic>?;
+    return AgentAnswer(
+      kind: json['kind'] as String? ?? 'answer',
+      answer: json['answer'] as String? ?? '',
+      provider: json['provider'] as String? ?? '',
+      toolCalls: [
+        for (final c in (json['tool_calls'] as List? ?? []))
+          (c as Map)['tool'] as String? ?? '',
+      ],
+      question: q == null ? null : AgentQuestion.fromJson(q),
+      proposal: p == null ? null : AgentProposal.fromJson(p),
+      state: (json['state'] as Map?)?.cast<String, dynamic>() ?? const {},
+    );
+  }
+}
+
+/// A clarification, with tappable answers.
+///
+/// Options are the whole point: asking is only acceptable when it costs one
+/// tap rather than typing, so the agent is told never to ask without them.
+class AgentQuestion {
+  const AgentQuestion({required this.text, this.options = const [], this.field = ''});
+
+  final String text;
+  final List<String> options;
+  final String field;
+
+  factory AgentQuestion.fromJson(Map<String, dynamic> json) => AgentQuestion(
+        text: json['text'] as String? ?? '',
+        options: [for (final o in (json['options'] as List? ?? [])) o.toString()],
+        field: json['field'] as String? ?? '',
+      );
+}
+
+/// A write waiting on approval. Nothing has happened yet.
+class AgentProposal {
+  const AgentProposal({
+    required this.id,
+    required this.kind,
+    this.targetId = '',
+    this.fields = const {},
+    this.before = const {},
+    this.summary = '',
+    this.changes = const [],
+    this.warnings = const [],
+    this.reason = '',
+  });
+
+  /// Unique per proposal, so a double tap cannot write twice.
+  final String id;
+
+  /// "add_transaction", "edit_transaction" or "delete_transaction".
+  final String kind;
+
+  /// Which record an edit or delete acts on.
+  final String targetId;
+
+  final Map<String, dynamic> fields;
+
+  /// Current values, so the card shows what is being replaced or removed.
+  final Map<String, dynamic> before;
+
+  final String summary;
+  final List<String> changes;
+  final List<String> warnings;
+  final String reason;
+
+  bool get isDelete => kind == 'delete_transaction';
+  bool get isEdit => kind == 'edit_transaction';
+
+  String get actionLabel => switch (kind) {
+        'delete_transaction' => 'Delete',
+        'edit_transaction' => 'Save change',
+        _ => 'Add',
+      };
+
+  factory AgentProposal.fromJson(Map<String, dynamic> json) => AgentProposal(
+        id: json['id'] as String? ?? '',
+        kind: json['kind'] as String? ?? '',
+        targetId: json['target_id'] as String? ?? '',
+        fields: (json['fields'] as Map?)?.cast<String, dynamic>() ?? const {},
+        before: (json['before'] as Map?)?.cast<String, dynamic>() ?? const {},
+        summary: json['summary'] as String? ?? '',
+        changes: [for (final c in (json['changes'] as List? ?? [])) c.toString()],
+        warnings: [for (final w in (json['warnings'] as List? ?? [])) w.toString()],
+        reason: json['reason'] as String? ?? '',
+      );
 }
