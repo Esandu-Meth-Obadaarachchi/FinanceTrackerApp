@@ -64,6 +64,8 @@ lib/
                               memory -> AI -> rules; approving writes the tx
                               and teaches the memory
     ai_service.dart         — client for backend/; builds the agent snapshot
+                              (with ids), and applies an approved proposal
+                              through AppState
     category_memory_service.dart — persists CategoryMemory to prefs
   state/app_state.dart     — ChangeNotifier; subscribes to 6 Firestore streams
                               (accounts, transactions, loans, recurring, budgets,
@@ -95,7 +97,8 @@ lib/
                               items + monthly carry-over (openBudgetPlanner)
     reminders_screen.dart  — custom due-payment reminders (openReminders)
     sms_review_screen.dart — bank-SMS review inbox (openSmsReview)
-    assistant_screen.dart  — agentic Q&A over your own data (openAssistant)
+    assistant_screen.dart  — agentic Q&A over your own data (openAssistant);
+                              renders option chips and write confirmation cards
     recurring_screen.dart  — manage fixed monthly automations (openRecurringManager)
     settings_screen.dart   — display, appearance, daily reminders, payment
                               reminders entry, bank-SMS toggle, version,
@@ -510,13 +513,64 @@ computed so the model never re-derives money rules the app owns. Tools in
 backend needs **no Firestore credentials** and retains nothing.
 
 Tools are pure functions of `(snapshot, arguments)`, which is what makes
-them testable without a model or a network.
+them testable without a model or a network. Ids travel in the snapshot so
+the agent can act on a specific row rather than describing one.
+
+### A turn ends in one of three ways
+
+`/agent/ask` replies with a `kind`, and the client renders each differently:
+
+| `kind` | Means | Client shows |
+|---|---|---|
+| `answer` | It answered | A chat bubble |
+| `question` | It needs something first | The text plus tappable option chips |
+| `proposal` | It wants to write | A confirmation card, nothing saved yet |
+
+**Only reading spends the iteration budget.** `MAX_ITERATIONS` is 3, which
+sounds tight and is not: `ask_user` and the `propose_*` tools in
+[`actions.py`](backend/app/services/actions.py) are **terminal** and stop the
+loop the moment they are called, so a write or a clarification costs one
+model call rather than eating the budget.
+
+### The agent cannot write, by construction
+
+The backend has no database credentials, so a `propose_*` tool validates a
+draft and hands it back. The client applies it through `AppState` on Apply.
+That makes "confirm before saving" **structural rather than a policy** — there
+is no path where an AI write reaches Firestore without a tap, and because it
+goes through the same `AppState` methods as a hand-typed entry, every money
+rule above still holds. The agent gets no privileged route around them.
+
+Add, edit and delete are all supported. Edit and delete carry `before` so the
+card shows what is being replaced or removed — the risk with those is not the
+write but approving one without seeing what it overwrites. Deleting an entry
+tagged `loanId` or `parentId` warns that it unwinds a derived rule.
+
+A rejected draft goes back to the model as a **tool result it can correct**,
+not an error the user sees. One rejection worth knowing: a negative amount is
+refused rather than `abs()`-ed, because direction lives in `type` and
+flipping the sign silently would turn `income -1200` into income of **+1200**.
+
+### Clarifications need explicit state, not just history
+
+`ask_user` only fires when the model can offer 2–4 tappable options — asking
+is acceptable when it costs one tap, not typing. Two cases are forced: a
+total with no time period ("what is my income?"), and which account when the
+user holds several.
+
+The reply carries a `state` object the client **echoes back untouched**. Chat
+history alone would leave the model re-inferring its own half-finished intent
+from prose, which is where these loops break. The backend stays stateless —
+the device is the memory.
 
 ### Rules that matter here
 
 - **Nothing AI-generated is ever saved without confirmation.** Parsing
-  returns drafts. One wrong silent write costs more trust than a hundred
-  right ones earn.
+  returns drafts and the agent returns proposals. One wrong silent write
+  costs more trust than a hundred right ones earn.
+- **Proposals carry an `id`.** Track applied ones so a double tap cannot
+  write twice, and keep cancelled apart from applied or a dismissed card
+  claims it saved something.
 - **`confidence` below 0.6** means the model guessed: open the sheet rather
   than offering one-tap approve.
 - **AI is off by default**, configured in Settings. Without a reachable
