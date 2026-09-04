@@ -459,9 +459,12 @@ an API key.
 > design — the layering, the provider fallback, the RAG and agent loop, and
 > why there is no vector store. The summary below is the short version.
 
-**Providers.** `gemini-3.6-flash` handles every request, with
-`claude-haiku-4-5` as the fallback. The fallback fires on **any** primary
-failure, including a 400 — the two vendors validate differently (Gemini 3.x
+**Providers.** `claude-haiku-4-5` handles every request, with
+`gemini-3.6-flash` as the free fallback (`PRIMARY_PROVIDER` flips it).
+Claude leads on measured latency: **2.7s median against Gemini's 34.5s**,
+because Flash 3.x thinks on every turn and thrashes on tool use, burning all
+three iterations where Claude answers in two. The fallback fires on **any**
+primary failure, including a 400 — the two vendors validate differently (Gemini 3.x
 rejects tool histories missing a `thoughtSignature`, which Claude has no
 concept of), so "4xx means the next provider will fail too" is wrong here.
 `response.provider` says who answered.

@@ -34,8 +34,8 @@ curl -s http://127.0.0.1:8099/health
 {
   "ok": true,
   "providers": { "gemini": true, "anthropic": true },
-  "primary": "gemini-3.6-flash",
-  "fallback": "claude-haiku-4-5"
+  "primary": "claude-haiku-4-5",
+  "fallback": "gemini-3.6-flash"
 }
 ```
 
@@ -233,10 +233,11 @@ Everything comes from the environment, or a local `.env`. See
 
 | Variable | Default | Notes |
 |---|---|---|
-| `GEMINI_API_KEY` | — | Primary provider. Blank disables it |
+| `PRIMARY_PROVIDER` | `anthropic` | Which is tried first. Claude leads: ~13x faster measured |
+| `GEMINI_API_KEY` | — | Blank disables it |
 | `GEMINI_AUTH_STYLE` | `api_key` | `api_key` sends `x-goog-api-key`; `oauth` sends `Authorization: Bearer` |
 | `GEMINI_MODEL` | `gemini-3.6-flash` | |
-| `ANTHROPIC_API_KEY` | — | Fallback. Blank disables it |
+| `ANTHROPIC_API_KEY` | — | Blank disables it |
 | `ANTHROPIC_MODEL` | `claude-haiku-4-5` | |
 | `CORS_ORIGINS` | `http://localhost:8567` | Comma-separated origins |
 | `APP_SHARED_KEY` | empty | Sent by the client as `X-App-Key` |

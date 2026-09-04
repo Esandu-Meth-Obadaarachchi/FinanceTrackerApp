@@ -87,9 +87,24 @@ because "lunch at odel" and "lunch odel" should reach the same answer.
 
 ## 3. Two providers, one interface
 
-`gemini-3.6-flash` handles every request. `claude-haiku-4-5` catches it when
-Gemini fails. The client never knows which answered, beyond a `provider`
-field it can display.
+`claude-haiku-4-5` handles every request. `gemini-3.6-flash` catches it when
+Claude fails. The client never knows which answered, beyond a `provider`
+field it can display. `PRIMARY_PROVIDER` flips the order.
+
+**Claude leads on measured latency, and the gap is not close.** Timed over
+the same four questions and the same snapshot:
+
+| | Gemini Flash | Claude Haiku |
+|---|---|---|
+| Median question | **34.5s** | **2.7s** |
+| Per model call | 5.0–24.0s | 1.1–2.2s |
+| Calls for a simple read | 4 (loop exhausted) | 2 |
+| Thinking tokens per call | 300–1,100 | none |
+
+Gemini is not merely slower per call. It thinks on every turn and it
+thrashes on tool use, spending all three iterations where Claude answers in
+two. Leading with the free tier saved roughly a pound a month and cost half
+a minute per question.
 
 ### The abstraction
 
@@ -169,12 +184,19 @@ A parse is roughly 900 tokens in, 100 out.
 
 | Model | Input / Output per 1M | Per parse | 300 parses/month |
 |---|---|---|---|
-| `gemini-3.6-flash` | free tier | — | — |
 | `claude-haiku-4-5` | $1 / $5 | ~$0.0014 | ~$0.42 |
+| `gemini-3.6-flash` | free tier | — | — |
 
-Agent questions cost more — several round trips, each carrying the tool
-schemas and accumulated results — but remain in cents per month at personal
-usage. The free tier absorbs most of it and Claude picks up the rest.
+An agent question runs ~2,550 input and ~120 output tokens per call, about
+two calls per question, so **~$0.006 a question**. Two hundred questions a
+month is around $1.25 — the price of the 13x speed-up over the free tier.
+
+**Prompt caching does not work at this size.** A breakpoint on the tools
+prefix, and again on tools+system (~2.4k tokens), both returned
+`cache_read_input_tokens: 0` — the prefix is under this model's minimum
+cacheable length. The `cache_control` was removed rather than left in, since
+a breakpoint that never hits reads as an optimisation that is running when
+it is not. Worth revisiting only if the tool set grows substantially.
 
 ---
 
