@@ -87,9 +87,15 @@ class AnthropicProvider(LLMProvider):
             "messages": self._turns_to_messages(turns),
         }
         if system:
+            # No cache_control here on purpose. Prompt caching was tried on
+            # the tools prefix and again on tools+system (~2.4k tokens) and
+            # cache_read_input_tokens came back zero both times — the prefix
+            # is under this model's minimum cacheable length. A breakpoint
+            # that never hits is worse than none: it reads as an optimisation
+            # that is running when it is not. Revisit if the tool set grows.
             kwargs["system"] = system
         if tools:
-            kwargs["tools"] = [
+            spec = [
                 {
                     "name": t.name,
                     "description": t.description,
@@ -97,6 +103,7 @@ class AnthropicProvider(LLMProvider):
                 }
                 for t in tools
             ]
+            kwargs["tools"] = spec
         if json_schema:
             kwargs["output_config"] = {
                 "format": {

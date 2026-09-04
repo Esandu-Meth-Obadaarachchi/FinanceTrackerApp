@@ -40,15 +40,14 @@ app.add_middleware(
 
 
 def get_router(settings: Settings = Depends(get_settings)) -> ProviderRouter:
-    """Gemini Flash first, Claude Haiku when it fails."""
-    return ProviderRouter(
-        primary=GeminiProvider(
-            settings.gemini_api_key, settings.gemini_model, settings.gemini_auth_style
-        ),
-        fallback=AnthropicProvider(
-            settings.anthropic_api_key, settings.anthropic_model
-        ),
+    """Whichever provider PRIMARY_PROVIDER names, with the other behind it."""
+    gemini = GeminiProvider(
+        settings.gemini_api_key, settings.gemini_model, settings.gemini_auth_style
     )
+    claude = AnthropicProvider(settings.anthropic_api_key, settings.anthropic_model)
+    if settings.primary_provider.strip().lower() == "gemini":
+        return ProviderRouter(primary=gemini, fallback=claude)
+    return ProviderRouter(primary=claude, fallback=gemini)
 
 
 def require_app_key(
@@ -74,8 +73,8 @@ def health(settings: Settings = Depends(get_settings)) -> dict:
             "gemini": settings.gemini_enabled,
             "anthropic": settings.anthropic_enabled,
         },
-        "primary": settings.gemini_model,
-        "fallback": settings.anthropic_model,
+        "primary": settings.primary_model,
+        "fallback": settings.fallback_model,
     }
 
 
