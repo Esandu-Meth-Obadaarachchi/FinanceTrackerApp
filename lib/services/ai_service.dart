@@ -229,6 +229,9 @@ class AiService {
   /// Balances and loan outstandings are computed here rather than sent raw,
   /// so the model never has to re-derive money rules the app already owns.
   static Map<String, dynamic> buildSnapshot(AppState app) => {
+        // The user's saved notes, so the agent can match what they typed to one
+        // and offer the rest as buttons when they did not say what it was for.
+        'notePresets': app.notePresets.toMap(),
         'accounts': [
           for (final a in app.accounts)
             {
