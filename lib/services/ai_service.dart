@@ -412,6 +412,9 @@ class AgentQuestion {
         options: [for (final o in (json['options'] as List? ?? [])) o.toString()],
         field: json['field'] as String? ?? '',
       );
+
+  Map<String, dynamic> toJson() =>
+      {'text': text, 'options': options, 'field': field};
 }
 
 /// A write waiting on approval. Nothing has happened yet.
@@ -467,4 +470,17 @@ class AgentProposal {
         warnings: [for (final w in (json['warnings'] as List? ?? [])) w.toString()],
         reason: json['reason'] as String? ?? '',
       );
+
+  /// Same keys [AgentProposal.fromJson] reads, so a saved chat round-trips.
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'kind': kind,
+        'target_id': targetId,
+        'fields': fields,
+        'before': before,
+        'summary': summary,
+        'changes': changes,
+        'warnings': warnings,
+        'reason': reason,
+      };
 }
