@@ -17,6 +17,8 @@ import uuid
 from typing import Any
 
 from ..providers.base import ToolSpec
+from difflib import SequenceMatcher
+
 from .parsing import EXPENSE_CATEGORIES, INCOME_CATEGORIES
 
 # ── Tool schemas ─────────────────────────────────────────────────────────
@@ -66,7 +68,15 @@ PROPOSE_ADD = ToolSpec(
             "type": {"type": "string", "enum": ["income", "expense", "transfer"]},
             "amount": {"type": "number", "description": "Positive, in LKR."},
             "category": {"type": "string", "description": "Exact label from the list."},
-            "note": {"type": "string", "description": "Short human label."},
+            "note": {
+                "type": "string",
+                "description": (
+                    "What it was for, in the user's own words, e.g. 'tehan "
+                    "class'. LEAVE IT OUT if they did not say: the app then "
+                    "offers their saved notes as buttons. Never fill it with "
+                    "the category just to have a value."
+                ),
+            },
             "date": {"type": "string", "description": "YYYY-MM-DD."},
             "account_name": {
                 "type": "string",
@@ -74,7 +84,7 @@ PROPOSE_ADD = ToolSpec(
             },
             "status": {"type": "string", "enum": ["received", "pending"]},
         },
-        "required": ["type", "amount", "category", "note"],
+        "required": ["type", "amount", "category"],
         "additionalProperties": False,
     },
 )
@@ -189,7 +199,62 @@ def _duplicate_warning(
     return []
 
 
-def build_add(args: dict[str, Any], snapshot: dict[str, Any], today: str) -> dict[str, Any]:
+# The chip that means "no heading, use the category". Offered with every note
+# question so there is always a one-tap way out.
+SKIP_NOTE = "No note"
+
+_NOTE_MATCH_THRESHOLD = 0.75
+_MAX_NOTE_CHIPS = 5
+
+
+def _norm(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+def match_note(text: str, presets: list[str]) -> str | None:
+    """The saved note the user most plausibly meant by `text`, or None.
+
+    Exact (ignoring case) wins outright. Otherwise a note that contains, or is
+    contained by, a preset scores high, and anything else falls back to string
+    similarity. Below the threshold nothing is returned: a typed heading the
+    user meant literally is better kept than swapped for a near miss. A tie
+    between different presets is also None, because guessing which of two
+    equally close notes was meant is the silent wrong write this app avoids.
+    """
+    t = _norm(text)
+    if not t:
+        return None
+    scored: list[tuple[float, str]] = []
+    for preset in presets:
+        q = _norm(preset)
+        if not q:
+            continue
+        if t == q:
+            return preset
+        if len(t) >= 3 and len(q) >= 3 and (t in q or q in t):
+            score = 0.9
+        else:
+            score = SequenceMatcher(None, t, q).ratio()
+        scored.append((score, preset))
+    if not scored:
+        return None
+    scored.sort(key=lambda x: x[0], reverse=True)
+    best_score, best = scored[0]
+    if best_score < _NOTE_MATCH_THRESHOLD:
+        return None
+    if len(scored) > 1 and scored[1][0] == best_score:
+        return None
+    return best
+
+
+def _note_presets(snapshot: dict[str, Any], tx_type: str) -> list[str]:
+    raw = (snapshot.get("notePresets") or {}).get(tx_type) or []
+    return [str(p) for p in raw if str(p).strip()]
+
+
+def build_add(
+    args: dict[str, Any], snapshot: dict[str, Any], today: str, ask_note: bool = True
+) -> dict[str, Any]:
     tx_type = args.get("type", "expense")
     try:
         amount = round(float(args.get("amount") or 0), 2)
@@ -224,7 +289,24 @@ def build_add(args: dict[str, Any], snapshot: dict[str, Any], today: str) -> dic
         }
 
     date = args.get("date") or today
-    note = (args.get("note") or category).strip()
+
+    # Notes: the user's saved headings come first. A typed note is snapped to the
+    # closest one; none given means ask with buttons, unless they have none saved
+    # or have just been asked (ask_note is False), in which case it is the category.
+    presets = _note_presets(snapshot, tx_type)
+    typed = (args.get("note") or "").strip()
+    if typed and _norm(typed) == _norm(SKIP_NOTE):
+        note = category
+    elif typed:
+        note = match_note(typed, presets) or typed
+    elif presets and ask_note:
+        return {
+            "error": "what is it for? the app will ask with buttons",
+            "needs": "note",
+            "options": presets,
+        }
+    else:
+        note = category
     status = args.get("status") if args.get("status") in ("received", "pending") else "received"
 
     return {
@@ -271,6 +353,16 @@ def build_edit(args: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any]
         if resolved != current.get("category"):
             fields["category"] = resolved
             changes.append(f"category {current.get('category')} → {resolved}")
+
+    note_arg = args.get("note")
+    if isinstance(note_arg, str) and note_arg.strip():
+        args = {
+            **args,
+            "note": match_note(
+                note_arg, _note_presets(snapshot, current.get("type", "expense"))
+            )
+            or note_arg.strip(),
+        }
 
     for key in ("note", "date", "status"):
         value = args.get(key)
@@ -351,11 +443,15 @@ def build_delete(args: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, An
 
 
 def build_proposal(
-    name: str, args: dict[str, Any], snapshot: dict[str, Any], today: str
+    name: str,
+    args: dict[str, Any],
+    snapshot: dict[str, Any],
+    today: str,
+    ask_note: bool = True,
 ) -> dict[str, Any]:
     """Validate one write tool call into a proposal, or an error the model reads."""
     if name == "propose_add_transaction":
-        return build_add(args, snapshot, today)
+        return build_add(args, snapshot, today, ask_note)
     if name == "propose_edit_transaction":
         return build_edit(args, snapshot)
     if name == "propose_delete_transaction":

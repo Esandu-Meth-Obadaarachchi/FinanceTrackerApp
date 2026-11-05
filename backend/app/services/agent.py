@@ -19,7 +19,13 @@ from typing import Any
 
 from ..providers.base import ToolResult, Turn
 from ..providers.router import ProviderRouter
-from .actions import ACTION_NAMES, ACTION_SPECS, build_proposal, build_question
+from .actions import (
+    ACTION_NAMES,
+    ACTION_SPECS,
+    SKIP_NOTE,
+    build_proposal,
+    build_question,
+)
 from .tools import TOOL_SPECS, run_tool
 
 log = logging.getLogger(__name__)
@@ -50,6 +56,16 @@ have been asked for together.
 use the `id` it returns. Never invent an id.
 - If several transactions match what the user described, ask which one \
 rather than picking.
+
+BUTTONS, NOT TYPING
+The user should rarely have to type a reply. Never write a question that \
+expects "yes", "no" or "ok" back, such as "Shall I add it?" or "Do you want me \
+to create this?". When you have what you need, call the propose_* tool \
+straight away: the card it produces already has Add and Cancel buttons. When \
+you need a choice, use ask_user so the answers are buttons.
+For a new entry, only pass `note` if the user said what it was for. If they \
+did not, leave it out: the app asks them with their saved notes as buttons. \
+When they do say, pass their words and the app matches them to a saved note.
 
 WHEN TO ASK, AND WHEN NOT TO
 Use ask_user ONLY when you can offer 2 to 4 concrete options the user can \
@@ -92,8 +108,17 @@ answer and carry on with what you were doing. Details you already have: \
 {collected}"""
 
 
-def _account_question(rejection: dict[str, Any]) -> dict[str, Any]:
-    """Turn an account rejection into a question the user answers with a tap."""
+def _needs_question(rejection: dict[str, Any]) -> dict[str, Any]:
+    """Turn a "missing account / note" rejection into a tap-to-answer question."""
+    if rejection.get("needs") == "note":
+        # The user's own saved notes, plus a way out. Unlike model-written
+        # questions this is not capped at four: they are real choices the
+        # user set up, and "No note" must never be cut off the end.
+        return {
+            "text": "What's this for?",
+            "options": [*rejection.get("options", [])[:5], SKIP_NOTE],
+            "field": "note",
+        }
     names = [n for n in rejection.get("accounts", []) if n]
     wanted = (rejection.get("asked_for") or "").strip()
     if not names:
@@ -207,8 +232,14 @@ async def run_agent(
                     },
                 )
 
+            # Once the user has answered the note question it is not asked again,
+            # whatever the model passes, or a blank note would loop forever.
             proposal = build_proposal(
-                terminal.name, terminal.arguments, snapshot, today
+                terminal.name,
+                terminal.arguments,
+                snapshot,
+                today,
+                ask_note=pending.get("field") != "note",
             )
             if "error" not in proposal:
                 return AgentReply(
@@ -225,8 +256,8 @@ async def run_agent(
             # round trip. The fix is a tap, so ask for it here. Leaving it to
             # the model burned the iteration budget on retries, and what came
             # out the far end was prose with no chips and no Apply card.
-            if proposal.get("needs") == "account":
-                asked = _account_question(proposal)
+            if proposal.get("needs") in ("account", "note"):
+                asked = _needs_question(proposal)
                 return AgentReply(
                     kind="question" if asked["options"] else "answer",
                     answer=asked["text"],
@@ -237,7 +268,7 @@ async def run_agent(
                     state={
                         "pending": {
                             "asked": asked["text"],
-                            "field": "account",
+                            "field": asked["field"],
                             "collected": {
                                 "action": terminal.name,
                                 "draft": terminal.arguments,

@@ -142,3 +142,64 @@ async def test_the_final_no_tools_call_is_told_not_to_mention_apply():
     assert reply.kind == "answer"
     assert router.calls == 4
     assert "never tell the user to tap Apply" in router.systems[-1]
+
+
+# ── Asking for the note with buttons ─────────────────────────────────────
+
+WITH_NOTES = {
+    **SNAPSHOT,
+    "notePresets": {"income": ["Tehan class", "Freelance design"]},
+}
+
+
+def propose_income(**extra):
+    args = {"type": "income", "amount": 5000, "category": "Employment Income",
+            "account_name": "Cash", **extra}
+    return LLMResponse(
+        text="", provider="fake",
+        tool_calls=[ToolCall(id="c1", name="propose_add_transaction", arguments=args)],
+    )
+
+
+async def test_a_missing_note_is_asked_with_the_saved_notes_as_buttons():
+    router = ScriptedRouter(propose_income())
+    reply = await run_agent(
+        router, question="add 5000 income", snapshot=WITH_NOTES, today="2026-11-05"
+    )
+
+    assert reply.kind == "question"
+    assert reply.question["options"] == ["Tehan class", "Freelance design", "No note"]
+    assert reply.state["pending"]["field"] == "note"
+    assert router.calls == 1
+
+
+async def test_tapping_a_saved_note_reaches_the_card():
+    router = ScriptedRouter(propose_income(note="Tehan class"))
+    reply = await run_agent(
+        router, question="Tehan class", snapshot=WITH_NOTES, today="2026-11-05",
+        state={"pending": {"field": "note", "asked": "What's this for?",
+                           "collected": {}}},
+    )
+
+    assert reply.kind == "proposal"
+    assert reply.proposal["fields"]["note"] == "Tehan class"
+
+
+async def test_the_note_question_is_never_asked_twice():
+    # The model forgets the note again after being answered; the user is not
+    # asked a second time and the entry falls back to its category.
+    router = ScriptedRouter(propose_income())
+    reply = await run_agent(
+        router, question="No note", snapshot=WITH_NOTES, today="2026-11-05",
+        state={"pending": {"field": "note", "asked": "What's this for?",
+                           "collected": {}}},
+    )
+
+    assert reply.kind == "proposal"
+    assert reply.proposal["fields"]["note"] == "Employment Income"
+
+
+async def test_the_system_prompt_forbids_asking_for_a_yes():
+    router = ScriptedRouter(LLMResponse(text="Hello", provider="fake"))
+    await run_agent(router, question="hi", snapshot=SNAPSHOT, today="2026-11-05")
+    assert "Never write a question that expects" in router.systems[0]

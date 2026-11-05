@@ -179,3 +179,95 @@ class TestQuestion:
 
 def test_an_unknown_action_is_refused():
     assert "error" in build_proposal("drop_database", {}, SNAPSHOT, "2026-09-03")
+
+
+# ── Quick notes ──────────────────────────────────────────────────────────
+
+from app.services.actions import SKIP_NOTE, match_note  # noqa: E402
+
+WITH_NOTES = {
+    **SNAPSHOT,
+    "notePresets": {
+        "income": ["Tehan class", "Freelance design"],
+        "expense": ["Bus fare", "Lunch"],
+    },
+}
+
+
+def add_with_notes(ask_note=True, **kwargs):
+    args = {"type": "income", "amount": 5000, "category": "Employment Income",
+            "account_name": "cash"}
+    args.update(kwargs)
+    return build_proposal("propose_add_transaction", args, WITH_NOTES,
+                          "2026-11-05", ask_note)
+
+
+class TestMatchNote:
+    def test_exact_ignoring_case_wins(self):
+        assert match_note("TEHAN class", ["Tehan class"]) == "Tehan class"
+
+    def test_a_shorter_phrase_inside_a_preset_matches(self):
+        assert match_note("tehan", ["Tehan class", "Lunch"]) == "Tehan class"
+
+    def test_a_typo_still_finds_it(self):
+        assert match_note("tehen class", ["Tehan class", "Lunch"]) == "Tehan class"
+
+    def test_unrelated_text_is_left_alone(self):
+        assert match_note("electricity bill", ["Tehan class", "Lunch"]) is None
+
+    def test_two_equally_close_presets_are_not_guessed_between(self):
+        assert match_note("class", ["Tehan class", "Math class"]) is None
+
+    def test_nothing_saved_or_nothing_typed_is_none(self):
+        assert match_note("tehan", []) is None
+        assert match_note("  ", ["Tehan class"]) is None
+
+
+class TestAddNotes:
+    def test_a_typed_note_snaps_to_the_saved_one(self):
+        p = add_with_notes(note="tehan class")
+        assert p["fields"]["note"] == "Tehan class"
+
+    def test_a_note_matching_nothing_is_kept_as_typed(self):
+        p = add_with_notes(note="Surprise bonus")
+        assert p["fields"]["note"] == "Surprise bonus"
+
+    def test_no_note_with_saved_notes_asks_instead_of_guessing(self):
+        p = add_with_notes()
+        assert p["needs"] == "note"
+        assert p["options"] == ["Tehan class", "Freelance design"]
+
+    def test_notes_are_offered_for_the_right_type_only(self):
+        p = add_with_notes(type="expense", category="Vehicle / Transport")
+        assert p["options"] == ["Bus fare", "Lunch"]
+
+    def test_no_saved_notes_falls_back_to_the_category_as_before(self):
+        p = build_proposal(
+            "propose_add_transaction",
+            {"type": "income", "amount": 5000, "category": "Employment Income",
+             "account_name": "cash"},
+            SNAPSHOT, "2026-11-05",
+        )
+        assert p["fields"]["note"] == "Employment Income"
+
+    def test_the_skip_answer_uses_the_category(self):
+        p = add_with_notes(note=SKIP_NOTE)
+        assert p["fields"]["note"] == "Employment Income"
+
+    def test_once_asked_it_is_never_asked_again(self):
+        p = add_with_notes(ask_note=False)
+        assert "error" not in p
+        assert p["fields"]["note"] == "Employment Income"
+
+
+def test_editing_a_note_snaps_to_a_saved_one_too():
+    p = build_proposal(
+        "propose_edit_transaction",
+        {"transaction_id": "t3", "note": "tehan class"},
+        {**WITH_NOTES, "transactions": [
+            {"id": "t3", "date": "2026-08-20", "type": "income",
+             "category": "Employment Income", "note": "x", "amount": 4100,
+             "status": "received", "accountId": "a1"}]},
+        "2026-11-05",
+    )
+    assert p["fields"]["note"] == "Tehan class"
