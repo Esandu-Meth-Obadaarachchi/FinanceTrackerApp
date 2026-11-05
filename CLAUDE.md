@@ -37,7 +37,8 @@ lib/
   app_info.dart            — kAppVersion (single source of truth; mirror in pubspec)
   models/
     account.dart (has smsIds), app_transaction.dart, loan.dart,
-    recurring_rule.dart, budget_plan.dart, reminder.dart, chat_session.dart
+    recurring_rule.dart, budget_plan.dart, reminder.dart, chat_session.dart,
+    note_presets.dart
       Plain Dart, fromMap/toMap. AppTransaction (not Transaction) to avoid
       clashing with cloud_firestore's Transaction.
     loan_math.dart         — pure balance/loan-settlement math (no Firestore),
@@ -48,6 +49,8 @@ lib/
     sms_suggestion.dart    — a reviewable bank-SMS transaction + its blocker
     chat_session.dart      — a saved assistant chat + the five-chat eviction
                               rule (pure, unit-tested)
+    note_presets.dart      — the user's quick notes (income / expense lists):
+                              add/remove/match, pure and unit-tested
   data/categories.dart     — Income/Expense categories + colour map + AccountColors
   services/
     auth_service.dart      — Email/password + Google sign-in, friendly errors
@@ -98,6 +101,7 @@ lib/
     budget_screen.dart     — zero-based / envelope planner with category line
                               items + monthly carry-over (openBudgetPlanner)
     reminders_screen.dart  — custom due-payment reminders (openReminders)
+    quick_notes_screen.dart — manage preset notes, per type (openQuickNotes)
     sms_review_screen.dart — bank-SMS review inbox (openSmsReview)
     assistant_screen.dart  — agentic Q&A over your own data (openAssistant);
                               renders option chips and write confirmation cards;
@@ -308,6 +312,7 @@ users/{uid}                       — implicit parent; no fields of its own
   ├─ recurring/{ruleId}
   ├─ budgets/current              — the single per-user zero-based plan
   ├─ reminders/{reminderId}
+  ├─ settings/notes               — the user's quick notes
   └─ chats/{chatId}               — saved assistant conversations, max 5
 ```
 `uid` is the FirebaseAuth user id. All collections are read live as streams in
@@ -422,6 +427,22 @@ into the new month (updates `month`, keeps allocations) or start fresh.
 | `active` | bool | paused reminders schedule nothing |
 | `createdAt` | timestamp | server-set; stream ordered by `dueDate` ascending |
 
+**settings/notes** — the user's quick notes ([note_presets.dart](lib/models/note_presets.dart))
+
+| field | type | notes |
+|---|---|---|
+| `income` | array<string> | headings offered when adding an income, e.g. `"Tehan class"` |
+| `expense` | array<string> | headings offered when adding an expense |
+
+A single document, fully overwritten on each change. Capped at 30 per type, no
+case-insensitive duplicates. They are managed in **Settings → Quick notes**.
+In the add/edit transaction sheet they appear as an optional dropdown: picking
+one becomes the entry's `note` and hides the text field; leaving it empty keeps
+the free-text field working as before. The stored `note` is just the string, so
+there is no link back to the preset: renaming or deleting one never changes past
+entries, and an edited entry whose note equals a preset reopens with it selected.
+The assistant gets them in its snapshot (`notePresets`) and matches against them.
+
 **chats/{chatId}** — a saved assistant conversation ([chat_session.dart](lib/models/chat_session.dart))
 
 | field | type | notes |
@@ -463,7 +484,7 @@ composite index here.
 ### Reset all data
 [`FirestoreService.resetAllData()`](lib/services/firestore_service.dart) deletes
 every document across `accounts`, `transactions`, `loans`, `recurring`,
-`budgets`, `reminders` and `chats` (batched in chunks of 400). There is **no undo**. It
+`budgets`, `reminders`, `settings` (quick notes) and `chats` (batched in chunks of 400). There is **no undo**. It
 is reached from **Settings → Danger Zone → Reset all data** behind a
 confirmation dialog. After the wipe the live streams emit empty, which also
 cancels any scheduled reminder notifications via `ReminderScheduler.syncAll`.
@@ -582,6 +603,22 @@ prose with no chips and no Apply card. The no-tools fallback is also told it
 cannot propose anything, so it never points at an Apply button that is not there. One rejection worth knowing: a negative amount is
 refused rather than `abs()`-ed, because direction lives in `type` and
 flipping the sign silently would turn `income -1200` into income of **+1200**.
+
+### Notes: snap to a saved one, ask with buttons, never loop
+
+For a new entry the agent only passes `note` when the user said what it was for.
+`match_note()` ([actions.py](backend/app/services/actions.py)) snaps it to the
+closest saved note, but only when it is clearly the same thing: exact, one
+containing the other, or a close typo. A weak match or a **tie** between two
+presets keeps the user's own words rather than guessing. If no note was given and
+notes are saved, `run_agent` asks "What's this for?" itself, with the saved notes
+plus a **No note** chip, so it costs no model call. Once the user has answered
+(`pending.field == "note"`) the question is never asked again, whatever the model
+passes, so a forgetful model cannot loop. With no saved notes the note falls back
+to the category, as before.
+
+The prompt also forbids questions that expect a typed "yes": the proposal card
+already has Add and Cancel, and any choice goes through `ask_user` as buttons.
 
 ### Clarifications need explicit state, not just history
 
