@@ -14,6 +14,7 @@ import '../utils/formatters.dart';
 import '../utils/responsive.dart';
 import '../widgets/common.dart';
 import '../widgets/form_fields.dart';
+import 'quick_notes_screen.dart';
 import 'reminders_screen.dart';
 
 /// Opens the settings screen. [ThemeController] lives above MaterialApp so it
@@ -91,6 +92,37 @@ class SettingsScreen extends StatelessWidget {
             _sectionLabel(colors, 'DAILY REMINDERS'),
             _DailyRemindersCard(colors: colors),
           ],
+          const SizedBox(height: 18),
+          _sectionLabel(colors, 'QUICK NOTES'),
+          InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => openQuickNotes(context),
+            child: AppCard(
+              colors: colors,
+              child: Row(
+                children: [
+                  Icon(Icons.bolt_outlined, size: 20, color: colors.sub),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Preset notes',
+                            style: sans(
+                                size: 14.5,
+                                weight: FontWeight.w600,
+                                color: colors.text)),
+                        const SizedBox(height: 2),
+                        Text('Pick "Tehan class" from a list instead of typing.',
+                            style: sans(size: 12, color: colors.sub)),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right, size: 20, color: colors.sub),
+                ],
+              ),
+            ),
+          ),
           const SizedBox(height: 18),
           _sectionLabel(colors, 'PAYMENT REMINDERS'),
           InkWell(
