@@ -92,6 +92,25 @@ answer and carry on with what you were doing. Details you already have: \
 {collected}"""
 
 
+def _account_question(rejection: dict[str, Any]) -> dict[str, Any]:
+    """Turn an account rejection into a question the user answers with a tap."""
+    names = [n for n in rejection.get("accounts", []) if n]
+    wanted = (rejection.get("asked_for") or "").strip()
+    if not names:
+        return {
+            "text": "You have no accounts yet. Add one under Accounts, then ask again.",
+            "options": [],
+            "field": "account",
+        }
+    if wanted:
+        text = f"I don't see an account called {wanted}. Which one should I use?"
+    else:
+        text = "Which account should this go to?"
+    # More than four accounts cannot all be chips; the first four are offered
+    # and the rest are reachable by typing the name.
+    return {"text": text, "options": names[:4], "field": "account"}
+
+
 @dataclass
 class AgentReply:
     """One turn's outcome. `kind` says which of the three shapes this is."""
@@ -202,6 +221,33 @@ async def run_agent(
                     proposal=proposal,
                 )
 
+            # A draft that only lacks a usable account is not worth a model
+            # round trip. The fix is a tap, so ask for it here. Leaving it to
+            # the model burned the iteration budget on retries, and what came
+            # out the far end was prose with no chips and no Apply card.
+            if proposal.get("needs") == "account":
+                asked = _account_question(proposal)
+                return AgentReply(
+                    kind="question" if asked["options"] else "answer",
+                    answer=asked["text"],
+                    provider=provider,
+                    tool_calls=used,
+                    iterations=iteration,
+                    question=asked if asked["options"] else None,
+                    state={
+                        "pending": {
+                            "asked": asked["text"],
+                            "field": "account",
+                            "collected": {
+                                "action": terminal.name,
+                                "draft": terminal.arguments,
+                            },
+                        }
+                    }
+                    if asked["options"]
+                    else {},
+                )
+
             # A rejected draft goes back as a tool result so the model can fix
             # it, rather than surfacing a validation error to the user.
             turns.append(
@@ -247,7 +293,11 @@ async def run_agent(
     # Out of read iterations: one more call with no tools, answering from what
     # was already gathered. A hard question degrades to a partial answer.
     final = await router.complete(
-        system=system + "\n\nAnswer now using what the tools already returned.",
+        system=system
+        + "\n\nAnswer now using what the tools already returned. You cannot "
+        "propose or save anything in this reply, so never tell the user to "
+        "tap Apply or say something was added. If they wanted a change, say "
+        "what you still need from them.",
         turns=turns,
         max_tokens=2048,
     )

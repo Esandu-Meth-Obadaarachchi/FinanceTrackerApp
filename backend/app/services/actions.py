@@ -218,6 +218,8 @@ def build_add(args: dict[str, Any], snapshot: dict[str, Any], today: str) -> dic
         names = [a.get("name") for a in snapshot.get("accounts", [])]
         return {
             "error": "which account? call ask_user with these options",
+            "needs": "account",
+            "asked_for": args.get("account_name", ""),
             "accounts": names,
         }
 
@@ -279,7 +281,12 @@ def build_edit(args: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any]
     if (name := args.get("account_name")) is not None:
         account = _find_account(snapshot, name)
         if account is None:
-            return {"error": f"no account called '{name}'"}
+            return {
+                "error": f"no account called '{name}'",
+                "needs": "account",
+                "asked_for": name,
+                "accounts": [a.get("name") for a in snapshot.get("accounts", [])],
+            }
         if account.get("id") != current.get("accountId"):
             fields["accountId"] = account.get("id")
             changes.append(f"account → {account.get('name')}")
