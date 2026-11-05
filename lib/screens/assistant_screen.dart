@@ -9,7 +9,6 @@ import '../theme/palette.dart';
 import '../theme/theme_controller.dart';
 import '../utils/formatters.dart';
 import '../utils/responsive.dart';
-import '../widgets/sheet_scaffold.dart';
 
 /// Opens the assistant, re-providing [AppState] for the pushed route.
 void openAssistant(BuildContext context) {
@@ -40,6 +39,7 @@ class AssistantScreen extends StatefulWidget {
 class _AssistantScreenState extends State<AssistantScreen> {
   final _input = TextEditingController();
   final _scroll = ScrollController();
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
   final List<ChatMessage> _messages = [];
   bool _busy = false;
 
@@ -145,21 +145,6 @@ class _AssistantScreenState extends State<AssistantScreen> {
     if (id == _chatId) _newChat();
   }
 
-  void _openHistory() {
-    final app = context.read<AppState>();
-    showAppSheet<void>(
-      context,
-      builder: (_) => ChangeNotifierProvider<AppState>.value(
-        value: app,
-        child: _HistorySheet(
-          currentId: _chatId,
-          onOpen: _openChat,
-          onDelete: _deleteChat,
-        ),
-      ),
-    );
-  }
-
   Future<void> _send(String text) async {
     final question = text.trim();
     if (question.isEmpty || _busy) return;
@@ -229,8 +214,50 @@ class _AssistantScreenState extends State<AssistantScreen> {
       if (_messages.isEmpty && app.chats.isNotEmpty) _load(app.chats.first);
     }
 
+    final wide = context.isWide;
+
+    // The chat itself. Its width, not the window's, decides how the column is
+    // centred, because the sidebar takes a slice of the window on desktop.
+    final chatPane = Column(
+      children: [
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, box) => _messages.isEmpty
+                ? _starterList(colors, box.maxWidth)
+                : ListView(
+                    controller: _scroll,
+                    padding: _insets(box.maxWidth, top: 16),
+                    children: [
+                      for (final m in _messages) _bubble(m, colors),
+                      if (_busy) _thinking(colors),
+                    ],
+                  ),
+          ),
+        ),
+        _composer(colors),
+      ],
+    );
+
+    Widget sidebar({required bool inDrawer}) => _ChatSidebar(
+          currentId: _chatId,
+          busy: _busy,
+          inDrawer: inDrawer,
+          onNew: _newChat,
+          onOpen: _openChat,
+          onDelete: _deleteChat,
+        );
+
     return Scaffold(
+      key: _scaffoldKey,
       backgroundColor: colors.bg,
+      // On a phone the same list slides in from the right instead.
+      endDrawer: wide
+          ? null
+          : Drawer(
+              backgroundColor: colors.card,
+              width: 300,
+              child: sidebar(inDrawer: true),
+            ),
       appBar: AppBar(
         backgroundColor: colors.bg,
         elevation: 0,
@@ -238,48 +265,56 @@ class _AssistantScreenState extends State<AssistantScreen> {
         iconTheme: IconThemeData(color: colors.text),
         title: Text('Assistant',
             style: sans(size: 18, weight: FontWeight.w800, color: colors.text)),
-        actions: [
-          IconButton(
-            tooltip: 'Past chats',
-            onPressed: _openHistory,
-            icon: Icon(Icons.history, color: colors.text),
-          ),
-          IconButton(
-            tooltip: 'New chat',
-            onPressed: _busy || _messages.isEmpty ? null : _newChat,
-            icon: Icon(Icons.add_comment_outlined,
-                color: _busy || _messages.isEmpty ? colors.muted : colors.text),
-          ),
-          const SizedBox(width: 4),
-        ],
+        actions: wide
+            ? null
+            : [
+                IconButton(
+                  tooltip: 'New chat',
+                  onPressed: _busy || _messages.isEmpty ? null : _newChat,
+                  icon: Icon(Icons.add_comment_outlined,
+                      color: _busy || _messages.isEmpty
+                          ? colors.muted
+                          : colors.text),
+                ),
+                IconButton(
+                  tooltip: 'Past chats',
+                  onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
+                  icon: Icon(Icons.history, color: colors.text),
+                ),
+                const SizedBox(width: 4),
+              ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
           child: Container(height: 1, color: colors.border),
         ),
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: _messages.isEmpty
-                ? _starterList(colors)
-                : ListView(
-                    controller: _scroll,
-                    padding: centredInsets(context, maxWidth: 760, top: 16),
-                    children: [
-                      for (final m in _messages) _bubble(m, colors),
-                      if (_busy) _thinking(colors),
-                    ],
+      body: wide
+          ? Row(
+              children: [
+                Container(
+                  width: 280,
+                  decoration: BoxDecoration(
+                    color: colors.card,
+                    border: Border(right: BorderSide(color: colors.border)),
                   ),
-          ),
-          _composer(colors),
-        ],
-      ),
+                  child: sidebar(inDrawer: false),
+                ),
+                Expanded(child: chatPane),
+              ],
+            )
+          : chatPane,
     );
   }
 
-  Widget _starterList(Palette colors) {
+  /// [centredInsets] measured against the chat pane rather than the window.
+  EdgeInsets _insets(double paneWidth, {double top = 14}) {
+    final side = ((paneWidth - 760) / 2).clamp(16.0, double.infinity);
+    return EdgeInsets.fromLTRB(side, top, side, 32);
+  }
+
+  Widget _starterList(Palette colors, double paneWidth) {
     return ListView(
-      padding: centredInsets(context, maxWidth: 760, top: 28),
+      padding: _insets(paneWidth, top: 28),
       children: [
         Icon(Icons.auto_awesome, size: 32, color: colors.sub),
         const SizedBox(height: 12),
@@ -662,16 +697,28 @@ class _AssistantScreenState extends State<AssistantScreen> {
   }
 }
 
-/// Saved conversations. Only the [kMaxChats] most recent are kept, so starting
-/// a sixth quietly removes the one that has gone longest without being used.
-class _HistorySheet extends StatelessWidget {
-  const _HistorySheet({
+/// The list of saved conversations, in the manner of Claude or ChatGPT: a
+/// permanent column beside the chat on a desktop, a drawer on a phone.
+///
+/// Only the [kMaxChats] most recent are kept, so starting another quietly
+/// removes the one that has gone longest without being used.
+class _ChatSidebar extends StatelessWidget {
+  const _ChatSidebar({
     required this.currentId,
+    required this.busy,
+    required this.inDrawer,
+    required this.onNew,
     required this.onOpen,
     required this.onDelete,
   });
 
   final String? currentId;
+  final bool busy;
+
+  /// A drawer has to close itself once a choice is made; a sidebar stays put.
+  final bool inDrawer;
+
+  final VoidCallback onNew;
   final void Function(ChatSession) onOpen;
   final void Function(String id) onDelete;
 
@@ -684,82 +731,133 @@ class _HistorySheet extends StatelessWidget {
     return fmtDateShort(dateKeyOf(t));
   }
 
+  void _closeDrawer(BuildContext context) {
+    if (inDrawer) Navigator.of(context).pop();
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.watch<ThemeController>().colors;
     final chats = context.watch<AppState>().chats;
 
-    return SheetScaffold(
-      title: 'Past chats',
-      colors: colors,
-      children: [
-        Text(
-          'The $kMaxChats most recent chats are kept. Starting another removes '
-          'the one you have used least recently.',
-          style: sans(size: 12.5, color: colors.sub, height: 1.4),
-        ),
-        const SizedBox(height: 14),
-        if (chats.isEmpty)
+    return SafeArea(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 24),
-            child: Center(
-              child: Text('No saved chats yet',
-                  style: sans(size: 13.5, color: colors.sub)),
-            ),
-          ),
-        for (final c in chats)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 6),
             child: GestureDetector(
-              onTap: () {
-                Navigator.of(context).pop();
-                onOpen(c);
-              },
+              onTap: busy
+                  ? null
+                  : () {
+                      _closeDrawer(context);
+                      onNew();
+                    },
               child: Container(
-                padding: const EdgeInsets.fromLTRB(14, 10, 4, 10),
+                padding: const EdgeInsets.symmetric(vertical: 11),
                 decoration: BoxDecoration(
-                  color: colors.elevated,
-                  border: Border.all(
-                    color: c.id == currentId
-                        ? const Color(0xFF3DEBA8).withValues(alpha: 0.5)
-                        : colors.border,
-                  ),
+                  gradient: busy ? null : Brand.addButton,
+                  color: busy ? colors.inputBg : null,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(c.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: sans(
-                                  size: 13.5,
-                                  weight: FontWeight.w600,
-                                  color: colors.text)),
-                          const SizedBox(height: 3),
-                          Text(
-                            '${c.messages.length} messages · ${_ago(c.updatedAt)}'
-                            '${c.id == currentId ? ' · open now' : ''}',
-                            style: sans(size: 11.5, color: colors.sub),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Delete chat',
-                      onPressed: () => onDelete(c.id),
-                      icon: Icon(Icons.delete_outline,
-                          size: 19, color: colors.sub),
-                    ),
+                    Icon(Icons.add,
+                        size: 18,
+                        color: busy ? colors.muted : const Color(0xFF0B0D14)),
+                    const SizedBox(width: 6),
+                    Text('New chat',
+                        style: sans(
+                            size: 13.5,
+                            weight: FontWeight.w700,
+                            color:
+                                busy ? colors.muted : const Color(0xFF0B0D14))),
                   ],
                 ),
               ),
             ),
           ),
-      ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 8),
+            child: Text('RECENT',
+                style: label(colors.sub)),
+          ),
+          Expanded(
+            child: chats.isEmpty
+                ? Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Text('Your conversations will appear here.',
+                        style: sans(size: 12.5, color: colors.sub, height: 1.4)),
+                  )
+                : ListView(
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                    children: [
+                      for (final c in chats)
+                        _row(context, colors, c, c.id == currentId),
+                    ],
+                  ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 8, 18, 14),
+            child: Text(
+              'The $kMaxChats most recent chats are kept.',
+              style: sans(size: 11.5, color: colors.muted),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _row(BuildContext context, Palette colors, ChatSession c, bool current) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: busy
+            ? null
+            : () {
+                _closeDrawer(context);
+                onOpen(c);
+              },
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 8, 2, 8),
+          decoration: BoxDecoration(
+            color: current
+                ? const Color(0xFF3DEBA8).withValues(alpha: 0.12)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(c.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: sans(
+                            size: 13.5,
+                            weight: current ? FontWeight.w700 : FontWeight.w500,
+                            color: colors.text)),
+                    const SizedBox(height: 2),
+                    Text(_ago(c.updatedAt),
+                        style: sans(size: 11, color: colors.sub)),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Delete chat',
+                visualDensity: VisualDensity.compact,
+                onPressed: busy ? null : () => onDelete(c.id),
+                icon: Icon(Icons.delete_outline, size: 18, color: colors.sub),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
