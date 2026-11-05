@@ -5,6 +5,7 @@ import '../models/app_transaction.dart';
 import '../models/budget_plan.dart';
 import '../models/chat_session.dart';
 import '../models/loan.dart';
+import '../models/note_presets.dart';
 import '../models/recurring_rule.dart';
 import '../models/reminder.dart';
 
@@ -30,6 +31,8 @@ class FirestoreService {
       _userDoc.collection('budgets');
   CollectionReference<Map<String, dynamic>> get _reminders =>
       _userDoc.collection('reminders');
+  CollectionReference<Map<String, dynamic>> get _settings =>
+      _userDoc.collection('settings');
   CollectionReference<Map<String, dynamic>> get _chats =>
       _userDoc.collection('chats');
 
@@ -66,6 +69,12 @@ class FirestoreService {
       .snapshots()
       .map((s) =>
           s.docs.map((d) => Reminder.fromMap(d.id, d.data())).toList());
+
+  /// The user's quick notes (doc `settings/notes`); empty if never set.
+  Stream<NotePresets> notePresetsStream() => _settings
+      .doc('notes')
+      .snapshots()
+      .map((d) => NotePresets.fromMap(d.data()));
 
   /// Saved assistant conversations, most recently updated first.
   Stream<List<ChatSession>> chatsStream() => _chats
@@ -126,6 +135,11 @@ class FirestoreService {
 
   Future<void> deleteReminder(String id) => _reminders.doc(id).delete();
 
+  // ── Quick notes ────────────────────────────────────────────────────────
+  // One document, fully overwritten, so a removed note is actually gone.
+  Future<void> setNotePresets(NotePresets p) =>
+      _settings.doc('notes').set(p.toMap());
+
   // ── Assistant chats ────────────────────────────────────────────────────
   String newChatId() => _chats.doc().id;
 
@@ -160,8 +174,8 @@ class FirestoreService {
 
   // ── Reset ──────────────────────────────────────────────────────────────
   /// Permanently deletes every document in the user's tree — accounts,
-  /// transactions, loans, recurring rules, budgets, reminders and assistant
-  /// chats. There is no
+  /// transactions, loans, recurring rules, budgets, reminders, quick notes
+  /// and assistant chats. There is no
   /// undo. Batched in chunks to stay within Firestore's per-batch limit.
   Future<void> resetAllData() async {
     for (final c in [
@@ -172,6 +186,7 @@ class FirestoreService {
       _budgets,
       _reminders,
       _chats,
+      _settings,
     ]) {
       await _deleteAllDocs(c);
     }

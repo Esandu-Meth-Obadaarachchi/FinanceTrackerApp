@@ -9,6 +9,7 @@ import '../models/chat_session.dart';
 import '../models/income_math.dart';
 import '../models/loan.dart';
 import '../models/loan_math.dart';
+import '../models/note_presets.dart';
 import '../models/recurring_rule.dart';
 import '../models/reminder.dart';
 import '../services/firestore_service.dart';
@@ -32,6 +33,7 @@ class AppState extends ChangeNotifier {
   List<Reminder> reminders = [];
   List<ChatSession> chats = []; // most recently updated first
   bool chatsReady = false;
+  NotePresets notePresets = const NotePresets();
 
   bool _accountsReady = false;
   bool _transactionsReady = false;
@@ -45,6 +47,7 @@ class AppState extends ChangeNotifier {
   StreamSubscription? _budgetSub;
   StreamSubscription? _reminderSub;
   StreamSubscription? _chatSub;
+  StreamSubscription? _notesSub;
 
   /// True once all collections have produced their first snapshot.
   bool get isLoading =>
@@ -93,6 +96,10 @@ class AppState extends ChangeNotifier {
     _chatSub = _service.chatsStream().listen((data) {
       chats = data;
       chatsReady = true;
+      notifyListeners();
+    });
+    _notesSub = _service.notePresetsStream().listen((data) {
+      notePresets = data;
       notifyListeners();
     });
   }
@@ -307,6 +314,13 @@ class AppState extends ChangeNotifier {
   /// empty, which also clears scheduled reminder notifications via syncAll.
   Future<void> resetAllData() => _service.resetAllData();
 
+  // ── Quick notes ────────────────────────────────────────────────────────
+  Future<void> addNotePreset(String type, String name) =>
+      _service.setNotePresets(notePresets.add(type, name));
+
+  Future<void> removeNotePreset(String type, String name) =>
+      _service.setNotePresets(notePresets.remove(type, name));
+
   // ── Assistant chats ────────────────────────────────────────────────────
   String newChatId() => _service.newChatId();
 
@@ -401,6 +415,7 @@ class AppState extends ChangeNotifier {
     _budgetSub?.cancel();
     _reminderSub?.cancel();
     _chatSub?.cancel();
+    _notesSub?.cancel();
     super.dispose();
   }
 }
