@@ -37,7 +37,7 @@ lib/
   app_info.dart            — kAppVersion (single source of truth; mirror in pubspec)
   models/
     account.dart (has smsIds), app_transaction.dart, loan.dart,
-    recurring_rule.dart, budget_plan.dart, reminder.dart
+    recurring_rule.dart, budget_plan.dart, reminder.dart, chat_session.dart
       Plain Dart, fromMap/toMap. AppTransaction (not Transaction) to avoid
       clashing with cloud_firestore's Transaction.
     loan_math.dart         — pure balance/loan-settlement math (no Firestore),
@@ -46,6 +46,8 @@ lib/
     category_memory.dart   — learns text/merchant -> category; stays quiet
                               when unsure (pure, unit-tested)
     sms_suggestion.dart    — a reviewable bank-SMS transaction + its blocker
+    chat_session.dart      — a saved assistant chat + the five-chat eviction
+                              rule (pure, unit-tested)
   data/categories.dart     — Income/Expense categories + colour map + AccountColors
   services/
     auth_service.dart      — Email/password + Google sign-in, friendly errors
@@ -67,9 +69,9 @@ lib/
                               (with ids), and applies an approved proposal
                               through AppState
     category_memory_service.dart — persists CategoryMemory to prefs
-  state/app_state.dart     — ChangeNotifier; subscribes to 6 Firestore streams
+  state/app_state.dart     — ChangeNotifier; subscribes to 7 Firestore streams
                               (accounts, transactions, loans, recurring, budgets,
-                              reminders — last two outside the load gate), exposes
+                              reminders, chats — last three outside the load gate), exposes
                               balanceOf()/totalBalance/totalLent, pastNotes(),
                               budget (single plan)/expenseByCategoryInMonth(),
                               CRUD passthroughs, resetAllData(), recurring
@@ -98,7 +100,8 @@ lib/
     reminders_screen.dart  — custom due-payment reminders (openReminders)
     sms_review_screen.dart — bank-SMS review inbox (openSmsReview)
     assistant_screen.dart  — agentic Q&A over your own data (openAssistant);
-                              renders option chips and write confirmation cards
+                              renders option chips and write confirmation cards;
+                              saves chats to Firestore, history sheet + new chat
     recurring_screen.dart  — manage fixed monthly automations (openRecurringManager)
     settings_screen.dart   — display, appearance, daily reminders, payment
                               reminders entry, bank-SMS toggle, version,
@@ -214,7 +217,7 @@ generated transaction. Reach the manager via `openRecurringManager(context)`
 (re-provides `AppState`, like sheets do) from the Transactions screen.
 
 ### Per-user Firestore layout
-Each user owns a `users/{uid}/{accounts,transactions,loans,recurring,budgets,reminders}`
+Each user owns a `users/{uid}/{accounts,transactions,loans,recurring,budgets,reminders,chats}`
 subtree; rules restrict access to the owner. Full field-by-field schema, ordering
 and deploy command live in the **Database architecture** section below.
 
@@ -304,7 +307,8 @@ users/{uid}                       — implicit parent; no fields of its own
   ├─ loans/{loanId}
   ├─ recurring/{ruleId}
   ├─ budgets/current              — the single per-user zero-based plan
-  └─ reminders/{reminderId}
+  ├─ reminders/{reminderId}
+  └─ chats/{chatId}               — saved assistant conversations, max 5
 ```
 `uid` is the FirebaseAuth user id. All collections are read live as streams in
 [`firestore_service.dart`](lib/services/firestore_service.dart) and held in
@@ -418,6 +422,25 @@ into the new month (updates `month`, keeps allocations) or start fresh.
 | `active` | bool | paused reminders schedule nothing |
 | `createdAt` | timestamp | server-set; stream ordered by `dueDate` ascending |
 
+**chats/{chatId}** — a saved assistant conversation ([chat_session.dart](lib/models/chat_session.dart))
+
+| field | type | notes |
+|---|---|---|
+| `title` | string | the opening question, shortened to 40 chars |
+| `messages` | array<map> | `{role, text, tools, provider, question?, proposal?}`; capped at the newest 100 |
+| `state` | map | the agent's echoed clarification state, restored so a half-finished question resumes |
+| `applied` | array<string> | proposal ids already applied, so a reopened card never offers a second Apply |
+| `dismissed` | array<string> | proposal ids the user cancelled |
+| `updatedAt` | timestamp | server-set on every save; the stream orders by it, descending |
+
+A user holds at most **5** (`kMaxChats`). `FirestoreService.createChat()` reads
+the collection fresh and deletes the least recently *updated* ones in the same
+batch as the new document, so the cap holds even before the live stream has
+loaded. It evicts by last-updated, not created: a chat still in use should
+never be the one that ages out (`chatIdsToEvict`, unit-tested). The chat doc is
+only created on the first message, so an empty chat is never stored; later saves
+are whole-document `set`s through `updateChat()`.
+
 Reminders are materialised into **local** notifications by
 [`reminder_scheduler.dart`](lib/services/reminder_scheduler.dart) (see
 "Local notifications & reminders"). No server send.
@@ -440,7 +463,7 @@ composite index here.
 ### Reset all data
 [`FirestoreService.resetAllData()`](lib/services/firestore_service.dart) deletes
 every document across `accounts`, `transactions`, `loans`, `recurring`,
-`budgets` and `reminders` (batched in chunks of 400). There is **no undo**. It
+`budgets`, `reminders` and `chats` (batched in chunks of 400). There is **no undo**. It
 is reached from **Settings → Danger Zone → Reset all data** behind a
 confirmation dialog. After the wipe the live streams emit empty, which also
 cancels any scheduled reminder notifications via `ReminderScheduler.syncAll`.
@@ -550,7 +573,13 @@ write but approving one without seeing what it overwrites. Deleting an entry
 tagged `loanId` or `parentId` warns that it unwinds a derived rule.
 
 A rejected draft goes back to the model as a **tool result it can correct**,
-not an error the user sees. One rejection worth knowing: a negative amount is
+not an error the user sees. The exception is a draft that only lacks a usable
+account (none named, or one that does not exist): `run_agent` answers that
+itself with an `ask_user`-style question whose options are the real account
+names, and keeps the draft in `state` so the next tap resumes it. Left to the
+model, repeated rejections ate the iteration budget and the turn ended as
+prose with no chips and no Apply card. The no-tools fallback is also told it
+cannot propose anything, so it never points at an Apply button that is not there. One rejection worth knowing: a negative amount is
 refused rather than `abs()`-ed, because direction lives in `type` and
 flipping the sign silently would turn `income -1200` into income of **+1200**.
 
