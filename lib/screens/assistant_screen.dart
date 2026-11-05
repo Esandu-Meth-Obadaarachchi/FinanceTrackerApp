@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../models/chat_session.dart';
 import '../services/ai_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_text.dart';
 import '../theme/palette.dart';
 import '../theme/theme_controller.dart';
+import '../utils/formatters.dart';
 import '../utils/responsive.dart';
+import '../widgets/sheet_scaffold.dart';
 
 /// Opens the assistant, re-providing [AppState] for the pushed route.
 void openAssistant(BuildContext context) {
@@ -19,28 +22,6 @@ void openAssistant(BuildContext context) {
       ),
     ),
   );
-}
-
-class _Message {
-  _Message(
-    this.role,
-    this.text, {
-    this.tools = const [],
-    this.provider = '',
-    this.question,
-    this.proposal,
-  });
-
-  final String role; // user | assistant
-  final String text;
-  final List<String> tools;
-  final String provider;
-
-  /// Set when the agent asked something back.
-  final AgentQuestion? question;
-
-  /// Set when the agent wants to write. Nothing is saved until Apply.
-  final AgentProposal? proposal;
 }
 
 /// Ask questions about your own money.
@@ -59,8 +40,23 @@ class AssistantScreen extends StatefulWidget {
 class _AssistantScreenState extends State<AssistantScreen> {
   final _input = TextEditingController();
   final _scroll = ScrollController();
-  final List<_Message> _messages = [];
+  final List<ChatMessage> _messages = [];
   bool _busy = false;
+
+  /// Id of the open conversation. Null until the first message is sent, so an
+  /// empty chat is never stored.
+  String? _chatId;
+
+  /// True once this conversation exists in Firestore. Until then a save goes
+  /// through createChat, which enforces the five-chat cap.
+  bool _created = false;
+
+  /// The latest saved chat is reopened once, the first time history loads.
+  bool _restored = false;
+
+  /// Saves run one after another so two quick ones cannot both think they are
+  /// creating the chat.
+  Future<void> _saving = Future.value();
 
   /// Echoed straight back to the backend each turn. Carries the agent's
   /// unfinished intent across a clarification.
@@ -87,13 +83,90 @@ class _AssistantScreenState extends State<AssistantScreen> {
     super.dispose();
   }
 
+  void _persist() {
+    if (_messages.isEmpty) return;
+    final app = context.read<AppState>();
+    _chatId ??= app.newChatId();
+    final firstUser = _messages.firstWhere((m) => m.role == 'user',
+        orElse: () => _messages.first);
+    final chat = ChatSession(
+      id: _chatId!,
+      title: chatTitleFrom(firstUser.text),
+      messages: List.of(_messages),
+      state: _state,
+      applied: {..._applied},
+      dismissed: {..._dismissed},
+    );
+    _saving = _saving.then((_) async {
+      try {
+        await app.saveChat(chat, isNew: !_created);
+        _created = true;
+      } catch (_) {
+        // History is a convenience; a failed save must never break the chat.
+      }
+    });
+  }
+
+  void _load(ChatSession c) {
+    _chatId = c.id;
+    _created = true;
+    _messages
+      ..clear()
+      ..addAll(c.messages);
+    _state = c.state;
+    _applied
+      ..clear()
+      ..addAll(c.applied);
+    _dismissed
+      ..clear()
+      ..addAll(c.dismissed);
+  }
+
+  void _newChat() {
+    if (_busy) return;
+    setState(() {
+      _chatId = null;
+      _created = false;
+      _messages.clear();
+      _state = const {};
+      _applied.clear();
+      _dismissed.clear();
+    });
+  }
+
+  void _openChat(ChatSession c) {
+    if (_busy) return;
+    setState(() => _load(c));
+    _scrollDown();
+  }
+
+  void _deleteChat(String id) {
+    context.read<AppState>().deleteChat(id);
+    if (id == _chatId) _newChat();
+  }
+
+  void _openHistory() {
+    final app = context.read<AppState>();
+    showAppSheet<void>(
+      context,
+      builder: (_) => ChangeNotifierProvider<AppState>.value(
+        value: app,
+        child: _HistorySheet(
+          currentId: _chatId,
+          onOpen: _openChat,
+          onDelete: _deleteChat,
+        ),
+      ),
+    );
+  }
+
   Future<void> _send(String text) async {
     final question = text.trim();
     if (question.isEmpty || _busy) return;
 
     final app = context.read<AppState>();
     setState(() {
-      _messages.add(_Message('user', question));
+      _messages.add(ChatMessage('user', question));
       _busy = true;
       _input.clear();
     });
@@ -111,7 +184,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
       if (!mounted) return;
       setState(() {
         _state = reply.state;
-        _messages.add(_Message(
+        _messages.add(ChatMessage(
           'assistant',
           reply.answer,
           tools: reply.toolCalls,
@@ -120,10 +193,11 @@ class _AssistantScreenState extends State<AssistantScreen> {
           proposal: reply.proposal,
         ));
       });
+      _persist();
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _messages.add(_Message('assistant',
+        _messages.add(ChatMessage('assistant',
             'I could not reach the assistant.\n\n$e'));
       });
     } finally {
@@ -147,6 +221,14 @@ class _AssistantScreenState extends State<AssistantScreen> {
   Widget build(BuildContext context) {
     final colors = context.watch<ThemeController>().colors;
 
+    // Pick up where the last conversation left off, once history has loaded
+    // and only if the user has not already started typing a new one.
+    final app = context.watch<AppState>();
+    if (!_restored && app.chatsReady) {
+      _restored = true;
+      if (_messages.isEmpty && app.chats.isNotEmpty) _load(app.chats.first);
+    }
+
     return Scaffold(
       backgroundColor: colors.bg,
       appBar: AppBar(
@@ -156,6 +238,20 @@ class _AssistantScreenState extends State<AssistantScreen> {
         iconTheme: IconThemeData(color: colors.text),
         title: Text('Assistant',
             style: sans(size: 18, weight: FontWeight.w800, color: colors.text)),
+        actions: [
+          IconButton(
+            tooltip: 'Past chats',
+            onPressed: _openHistory,
+            icon: Icon(Icons.history, color: colors.text),
+          ),
+          IconButton(
+            tooltip: 'New chat',
+            onPressed: _busy || _messages.isEmpty ? null : _newChat,
+            icon: Icon(Icons.add_comment_outlined,
+                color: _busy || _messages.isEmpty ? colors.muted : colors.text),
+          ),
+          const SizedBox(width: 4),
+        ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
           child: Container(height: 1, color: colors.border),
@@ -235,6 +331,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
     try {
       await AiService.applyProposal(p, app);
       if (!mounted) return;
+      _persist();
       messenger.showSnackBar(SnackBar(
           content: Text(p.isDelete ? 'Deleted' : 'Saved')));
     } catch (e) {
@@ -245,7 +342,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
     }
   }
 
-  Widget _bubble(_Message m, Palette colors) {
+  Widget _bubble(ChatMessage m, Palette colors) {
     final isUser = m.role == 'user';
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -447,7 +544,10 @@ class _AssistantScreenState extends State<AssistantScreen> {
                 ),
                 const SizedBox(width: 8),
                 GestureDetector(
-                  onTap: () => setState(() => _dismissed.add(p.id)),
+                  onTap: () {
+                    setState(() => _dismissed.add(p.id));
+                    _persist();
+                  },
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 14, vertical: 10),
@@ -558,6 +658,108 @@ class _AssistantScreenState extends State<AssistantScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Saved conversations. Only the [kMaxChats] most recent are kept, so starting
+/// a sixth quietly removes the one that has gone longest without being used.
+class _HistorySheet extends StatelessWidget {
+  const _HistorySheet({
+    required this.currentId,
+    required this.onOpen,
+    required this.onDelete,
+  });
+
+  final String? currentId;
+  final void Function(ChatSession) onOpen;
+  final void Function(String id) onDelete;
+
+  static String _ago(DateTime? t) {
+    if (t == null) return 'just now';
+    final d = DateTime.now().difference(t);
+    if (d.inMinutes < 1) return 'just now';
+    if (d.inMinutes < 60) return '${d.inMinutes}m ago';
+    if (d.inHours < 24) return '${d.inHours}h ago';
+    return fmtDateShort(dateKeyOf(t));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.watch<ThemeController>().colors;
+    final chats = context.watch<AppState>().chats;
+
+    return SheetScaffold(
+      title: 'Past chats',
+      colors: colors,
+      children: [
+        Text(
+          'The $kMaxChats most recent chats are kept. Starting another removes '
+          'the one you have used least recently.',
+          style: sans(size: 12.5, color: colors.sub, height: 1.4),
+        ),
+        const SizedBox(height: 14),
+        if (chats.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            child: Center(
+              child: Text('No saved chats yet',
+                  style: sans(size: 13.5, color: colors.sub)),
+            ),
+          ),
+        for (final c in chats)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: GestureDetector(
+              onTap: () {
+                Navigator.of(context).pop();
+                onOpen(c);
+              },
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(14, 10, 4, 10),
+                decoration: BoxDecoration(
+                  color: colors.elevated,
+                  border: Border.all(
+                    color: c.id == currentId
+                        ? const Color(0xFF3DEBA8).withValues(alpha: 0.5)
+                        : colors.border,
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(c.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: sans(
+                                  size: 13.5,
+                                  weight: FontWeight.w600,
+                                  color: colors.text)),
+                          const SizedBox(height: 3),
+                          Text(
+                            '${c.messages.length} messages · ${_ago(c.updatedAt)}'
+                            '${c.id == currentId ? ' · open now' : ''}',
+                            style: sans(size: 11.5, color: colors.sub),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Delete chat',
+                      onPressed: () => onDelete(c.id),
+                      icon: Icon(Icons.delete_outline,
+                          size: 19, color: colors.sub),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
