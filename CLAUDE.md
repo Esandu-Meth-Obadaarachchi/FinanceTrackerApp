@@ -37,12 +37,20 @@ lib/
   app_info.dart            — kAppVersion (single source of truth; mirror in pubspec)
   models/
     account.dart (has smsIds), app_transaction.dart, loan.dart,
-    recurring_rule.dart, budget_plan.dart, reminder.dart
+    recurring_rule.dart, budget_plan.dart, reminder.dart, chat_session.dart,
+    note_presets.dart
       Plain Dart, fromMap/toMap. AppTransaction (not Transaction) to avoid
       clashing with cloud_firestore's Transaction.
     loan_math.dart         — pure balance/loan-settlement math (no Firestore),
                               so the money rules stay unit-testable
     income_math.dart       — pure split math for part-paying a pending income
+    category_memory.dart   — learns text/merchant -> category; stays quiet
+                              when unsure (pure, unit-tested)
+    sms_suggestion.dart    — a reviewable bank-SMS transaction + its blocker
+    chat_session.dart      — a saved assistant chat + the five-chat eviction
+                              rule (pure, unit-tested)
+    note_presets.dart      — the user's quick notes (income / expense lists):
+                              add/remove/match, pure and unit-tested
   data/categories.dart     — Income/Expense categories + colour map + AccountColors
   services/
     auth_service.dart      — Email/password + Google sign-in, friendly errors
@@ -56,10 +64,17 @@ lib/
     messaging_service.dart  — FCM: subscribe `all` + per-uid topics, foreground
                               messages shown via notification_service
     sms_parser.dart         — pure-Dart bank-SMS regex parser + category guess
-    sms_service.dart        — Android SMS listener + inbox scan -> addTransaction
-  state/app_state.dart     — ChangeNotifier; subscribes to 6 Firestore streams
+    sms_service.dart        — Android SMS listener + inbox scan -> SmsInbox
+    sms_inbox.dart          — queues bank-SMS suggestions for review; layers
+                              memory -> AI -> rules; approving writes the tx
+                              and teaches the memory
+    ai_service.dart         — client for backend/; builds the agent snapshot
+                              (with ids), and applies an approved proposal
+                              through AppState
+    category_memory_service.dart — persists CategoryMemory to prefs
+  state/app_state.dart     — ChangeNotifier; subscribes to 7 Firestore streams
                               (accounts, transactions, loans, recurring, budgets,
-                              reminders — last two outside the load gate), exposes
+                              reminders, chats — last three outside the load gate), exposes
                               balanceOf()/totalBalance/totalLent, pastNotes(),
                               budget (single plan)/expenseByCategoryInMonth(),
                               CRUD passthroughs, resetAllData(), recurring
@@ -86,6 +101,11 @@ lib/
     budget_screen.dart     — zero-based / envelope planner with category line
                               items + monthly carry-over (openBudgetPlanner)
     reminders_screen.dart  — custom due-payment reminders (openReminders)
+    quick_notes_screen.dart — manage preset notes, per type (openQuickNotes)
+    sms_review_screen.dart — bank-SMS review inbox (openSmsReview)
+    assistant_screen.dart  — agentic Q&A over your own data (openAssistant);
+                              renders option chips and write confirmation cards;
+                              saves chats to Firestore, history sheet + new chat
     recurring_screen.dart  — manage fixed monthly automations (openRecurringManager)
     settings_screen.dart   — display, appearance, daily reminders, payment
                               reminders entry, bank-SMS toggle, version,
@@ -201,7 +221,7 @@ generated transaction. Reach the manager via `openRecurringManager(context)`
 (re-provides `AppState`, like sheets do) from the Transactions screen.
 
 ### Per-user Firestore layout
-Each user owns a `users/{uid}/{accounts,transactions,loans,recurring,budgets,reminders}`
+Each user owns a `users/{uid}/{accounts,transactions,loans,recurring,budgets,reminders,chats}`
 subtree; rules restrict access to the owner. Full field-by-field schema, ordering
 and deploy command live in the **Database architecture** section below.
 
@@ -291,7 +311,9 @@ users/{uid}                       — implicit parent; no fields of its own
   ├─ loans/{loanId}
   ├─ recurring/{ruleId}
   ├─ budgets/current              — the single per-user zero-based plan
-  └─ reminders/{reminderId}
+  ├─ reminders/{reminderId}
+  ├─ settings/notes               — the user's quick notes
+  └─ chats/{chatId}               — saved assistant conversations, max 5
 ```
 `uid` is the FirebaseAuth user id. All collections are read live as streams in
 [`firestore_service.dart`](lib/services/firestore_service.dart) and held in
@@ -405,6 +427,41 @@ into the new month (updates `month`, keeps allocations) or start fresh.
 | `active` | bool | paused reminders schedule nothing |
 | `createdAt` | timestamp | server-set; stream ordered by `dueDate` ascending |
 
+**settings/notes** — the user's quick notes ([note_presets.dart](lib/models/note_presets.dart))
+
+| field | type | notes |
+|---|---|---|
+| `income` | array<string> | headings offered when adding an income, e.g. `"Tehan class"` |
+| `expense` | array<string> | headings offered when adding an expense |
+
+A single document, fully overwritten on each change. Capped at 30 per type, no
+case-insensitive duplicates. They are managed in **Settings → Quick notes**.
+In the add/edit transaction sheet they appear as an optional dropdown: picking
+one becomes the entry's `note` and hides the text field; leaving it empty keeps
+the free-text field working as before. The stored `note` is just the string, so
+there is no link back to the preset: renaming or deleting one never changes past
+entries, and an edited entry whose note equals a preset reopens with it selected.
+The assistant gets them in its snapshot (`notePresets`) and matches against them.
+
+**chats/{chatId}** — a saved assistant conversation ([chat_session.dart](lib/models/chat_session.dart))
+
+| field | type | notes |
+|---|---|---|
+| `title` | string | the opening question, shortened to 40 chars |
+| `messages` | array<map> | `{role, text, tools, provider, question?, proposal?}`; capped at the newest 100 |
+| `state` | map | the agent's echoed clarification state, restored so a half-finished question resumes |
+| `applied` | array<string> | proposal ids already applied, so a reopened card never offers a second Apply |
+| `dismissed` | array<string> | proposal ids the user cancelled |
+| `updatedAt` | timestamp | server-set on every save; the stream orders by it, descending |
+
+A user holds at most **5** (`kMaxChats`). `FirestoreService.createChat()` reads
+the collection fresh and deletes the least recently *updated* ones in the same
+batch as the new document, so the cap holds even before the live stream has
+loaded. It evicts by last-updated, not created: a chat still in use should
+never be the one that ages out (`chatIdsToEvict`, unit-tested). The chat doc is
+only created on the first message, so an empty chat is never stored; later saves
+are whole-document `set`s through `updateChat()`.
+
 Reminders are materialised into **local** notifications by
 [`reminder_scheduler.dart`](lib/services/reminder_scheduler.dart) (see
 "Local notifications & reminders"). No server send.
@@ -427,11 +484,175 @@ composite index here.
 ### Reset all data
 [`FirestoreService.resetAllData()`](lib/services/firestore_service.dart) deletes
 every document across `accounts`, `transactions`, `loans`, `recurring`,
-`budgets` and `reminders` (batched in chunks of 400). There is **no undo**. It
+`budgets`, `reminders`, `settings` (quick notes) and `chats` (batched in chunks of 400). There is **no undo**. It
 is reached from **Settings → Danger Zone → Reset all data** behind a
 confirmation dialog. After the wipe the live streams emit empty, which also
 cancels any scheduled reminder notifications via `ReminderScheduler.syncAll`.
 Local prefs (theme, daily-reminder times, SMS dedupe set) are **not** touched.
+
+## AI features and the `backend/` service
+
+Three features share one FastAPI service in [`backend/`](backend/README.md):
+the bank-SMS review inbox, the local category memory, and the assistant. It
+exists because a Flutter web bundle is fully inspectable and so cannot hold
+an API key.
+
+> **Full documentation:** [`backend/README.md`](backend/README.md) covers
+> running the service, every endpoint with worked examples, configuration and
+> troubleshooting. [`backend/docs/AI.md`](backend/docs/AI.md) covers the AI
+> design — the layering, the provider fallback, the RAG and agent loop, and
+> why there is no vector store. The summary below is the short version.
+
+**Providers.** `claude-haiku-4-5` handles every request, with
+`gemini-3.6-flash` as the free fallback (`PRIMARY_PROVIDER` flips it).
+Claude leads on measured latency: **2.7s median against Gemini's 34.5s**,
+because Flash 3.x thinks on every turn and thrashes on tool use, burning all
+three iterations where Claude answers in two. The fallback fires on **any**
+primary failure, including a 400 — the two vendors validate differently (Gemini 3.x
+rejects tool histories missing a `thoughtSignature`, which Claude has no
+concept of), so "4xx means the next provider will fail too" is wrong here.
+`response.provider` says who answered.
+
+Two Gemini quirks are handled in `providers/gemini.py` and worth knowing
+before touching it: Flash 3.x **always** thinks (`thinkingBudget: 0` is
+rejected) and those tokens come out of `maxOutputTokens`, so a tight budget
+returns `MAX_TOKENS` with empty content; and its function calls carry a
+`thoughtSignature` that must be echoed back or the next turn 400s.
+
+### Everything is layered cheapest-first
+
+The ordering is the design, not an optimisation:
+
+1. **Local memory** ([`models/category_memory.dart`](lib/models/category_memory.dart))
+   — instant, free, offline, and correct for anything seen before.
+2. **Regex** ([`services/sms_parser.dart`](lib/services/sms_parser.dart)) —
+   amount and direction out of a bank SMS.
+3. **The model** — only for text nothing local recognises.
+
+`CategoryMemory` refuses to answer when its top two categories are close.
+A confident wrong suggestion is worse than silence: the user stops trusting
+the fill-in and checks every field by hand, which is the friction the
+feature exists to remove.
+
+### The review inbox replaced auto-import
+
+`SmsService` no longer writes transactions. It feeds
+[`SmsInbox`](lib/services/sms_inbox.dart), which queues suggestions the user
+approves.
+
+The old guard posted only when regex matched **and** the tail mapped to
+exactly one account, and dropped everything else silently. That one rule was
+doing two jobs — keeping bad data out, and choosing what to show — and did
+the second badly. Because nothing is written without a tap now, the bar for
+showing something is only "probably useful". Approving teaches the memory,
+so the same merchant costs nothing next time.
+
+Suggestions live in SharedPreferences, not Firestore: a queue of unreviewed
+guesses is per-device working state. The approved transaction is the only
+thing worth syncing.
+
+### The assistant is agentic, and stateless server-side
+
+The client posts a snapshot of its own data with each question
+(`AiService.buildSnapshot`), with balances and loan outstandings already
+computed so the model never re-derives money rules the app owns. Tools in
+`backend/app/services/tools.py` filter and aggregate that snapshot, so the
+backend needs **no Firestore credentials** and retains nothing.
+
+Tools are pure functions of `(snapshot, arguments)`, which is what makes
+them testable without a model or a network. Ids travel in the snapshot so
+the agent can act on a specific row rather than describing one.
+
+### A turn ends in one of three ways
+
+`/agent/ask` replies with a `kind`, and the client renders each differently:
+
+| `kind` | Means | Client shows |
+|---|---|---|
+| `answer` | It answered | A chat bubble |
+| `question` | It needs something first | The text plus tappable option chips |
+| `proposal` | It wants to write | A confirmation card, nothing saved yet |
+
+**Only reading spends the iteration budget.** `MAX_ITERATIONS` is 3, which
+sounds tight and is not: `ask_user` and the `propose_*` tools in
+[`actions.py`](backend/app/services/actions.py) are **terminal** and stop the
+loop the moment they are called, so a write or a clarification costs one
+model call rather than eating the budget.
+
+### The agent cannot write, by construction
+
+The backend has no database credentials, so a `propose_*` tool validates a
+draft and hands it back. The client applies it through `AppState` on Apply.
+That makes "confirm before saving" **structural rather than a policy** — there
+is no path where an AI write reaches Firestore without a tap, and because it
+goes through the same `AppState` methods as a hand-typed entry, every money
+rule above still holds. The agent gets no privileged route around them.
+
+Add, edit and delete are all supported. Edit and delete carry `before` so the
+card shows what is being replaced or removed — the risk with those is not the
+write but approving one without seeing what it overwrites. Deleting an entry
+tagged `loanId` or `parentId` warns that it unwinds a derived rule.
+
+A rejected draft goes back to the model as a **tool result it can correct**,
+not an error the user sees. The exception is a draft that only lacks a usable
+account (none named, or one that does not exist): `run_agent` answers that
+itself with an `ask_user`-style question whose options are the real account
+names, and keeps the draft in `state` so the next tap resumes it. Left to the
+model, repeated rejections ate the iteration budget and the turn ended as
+prose with no chips and no Apply card. The no-tools fallback is also told it
+cannot propose anything, so it never points at an Apply button that is not there. One rejection worth knowing: a negative amount is
+refused rather than `abs()`-ed, because direction lives in `type` and
+flipping the sign silently would turn `income -1200` into income of **+1200**.
+
+### Notes: snap to a saved one, ask with buttons, never loop
+
+For a new entry the agent only passes `note` when the user said what it was for.
+`match_note()` ([actions.py](backend/app/services/actions.py)) snaps it to the
+closest saved note, but only when it is clearly the same thing: exact, one
+containing the other, or a close typo. A weak match or a **tie** between two
+presets keeps the user's own words rather than guessing. If no note was given and
+notes are saved, `run_agent` asks "What's this for?" itself, with the saved notes
+plus a **No note** chip, so it costs no model call. Once the user has answered
+(`pending.field == "note"`) the question is never asked again, whatever the model
+passes, so a forgetful model cannot loop. With no saved notes the note falls back
+to the category, as before.
+
+The system prompt carries the real income and expense category lists and the
+defaults for a new entry (date today, status received, closest category, ask
+nothing but amount and type). Without the lists the model invented labels such
+as "Salary", was rejected, and spent its turns, or asked for a date that always
+defaults to today.
+
+The prompt also forbids questions that expect a typed "yes": the proposal card
+already has Add and Cancel, and any choice goes through `ask_user` as buttons.
+
+### Clarifications need explicit state, not just history
+
+`ask_user` only fires when the model can offer 2–4 tappable options — asking
+is acceptable when it costs one tap, not typing. Two cases are forced: a
+total with no time period ("what is my income?"), and which account when the
+user holds several.
+
+The reply carries a `state` object the client **echoes back untouched**. Chat
+history alone would leave the model re-inferring its own half-finished intent
+from prose, which is where these loops break. The backend stays stateless —
+the device is the memory.
+
+### Rules that matter here
+
+- **Nothing AI-generated is ever saved without confirmation.** Parsing
+  returns drafts and the agent returns proposals. One wrong silent write
+  costs more trust than a hundred right ones earn.
+- **Proposals carry an `id`.** Track applied ones so a double tap cannot
+  write twice, and keep cancelled apart from applied or a dismissed card
+  claims it saved something.
+- **`confidence` below 0.6** means the model guessed: open the sheet rather
+  than offering one-tap approve.
+- **AI is off by default**, configured in Settings. Without a reachable
+  backend every AI path would sit on a timeout.
+- **Secrets live in `backend/.env`**, which is gitignored. Set
+  `APP_SHARED_KEY` before hosting or the endpoint is an open proxy onto paid
+  credits.
 
 ## Firebase project
 

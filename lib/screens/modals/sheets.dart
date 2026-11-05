@@ -148,6 +148,12 @@ class _AddTransactionSheetState extends State<_AddTransactionSheet> {
   String _status = 'received';
   bool _saving = false;
 
+  /// The quick note picked from the dropdown, if any. When set it is the entry's
+  /// heading and the free-text field is not shown; when null the text field
+  /// is used exactly as before.
+  String? _preset;
+  bool _presetResolved = false;
+
   @override
   void initState() {
     super.initState();
@@ -193,6 +199,10 @@ class _AddTransactionSheetState extends State<_AddTransactionSheet> {
       return;
     }
 
+    // Same test the form uses to decide whether the dropdown is in play.
+    final chosen =
+        app.notePresets.forType(_type).contains(_preset) ? _preset : null;
+
     setState(() => _saving = true);
     final tx = AppTransaction(
       id: widget.edit?.id ?? '',
@@ -201,7 +211,7 @@ class _AddTransactionSheetState extends State<_AddTransactionSheet> {
       accountId: _accountId,
       toAccountId: _type == 'transfer' ? _toAccountId : null,
       category: _category.isNotEmpty ? _category : _defaultCategory(_type),
-      note: _note.text.trim(),
+      note: chosen ?? _note.text.trim(),
       date: dateKeyOf(_date),
       status: _type == 'income' ? _status : 'received',
     );
@@ -231,6 +241,13 @@ class _AddTransactionSheetState extends State<_AddTransactionSheet> {
     final app = context.watch<AppState>();
     final accounts = app.accounts;
     final typeColor = _typeColors[_type]!;
+    final presets = app.notePresets.forType(_type);
+
+    // Reopening an entry whose note is one of the presets selects it again.
+    if (!_presetResolved && widget.edit != null) {
+      _presetResolved = true;
+      _preset = app.notePresets.match(_type, widget.edit!.note);
+    }
 
     // Default the selected account once accounts load.
     if (_accountId.isEmpty && accounts.isNotEmpty) {
@@ -253,6 +270,7 @@ class _AddTransactionSheetState extends State<_AddTransactionSheet> {
                   onTap: () => setState(() {
                     _type = t;
                     _category = '';
+                    _preset = null; // presets are per type
                   }),
                   child: Container(
                     margin: EdgeInsets.only(right: t != 'transfer' ? 8 : 0),
@@ -389,13 +407,32 @@ class _AddTransactionSheetState extends State<_AddTransactionSheet> {
         ],
 
         const SizedBox(height: 16),
-        AppAutocompleteField(
-          colors: colors,
-          controller: _note,
-          options: app.pastNotes(type: _type),
-          label: 'Note / Description',
-          hint: 'e.g. Monthly salary from XYZ',
-        ),
+        if (presets.isNotEmpty) ...[
+          AppDropdown<String?>(
+            colors: colors,
+            label: 'Quick note (optional)',
+            value: presets.contains(_preset) ? _preset : null,
+            items: [
+              DropdownMenuItem<String?>(
+                value: null,
+                child: Text('None — type a note instead',
+                    style: sans(size: 14, color: colors.muted)),
+              ),
+              for (final p in presets)
+                DropdownMenuItem<String?>(value: p, child: Text(p)),
+            ],
+            onChanged: (v) => setState(() => _preset = v),
+          ),
+          const SizedBox(height: 14),
+        ],
+        if (_preset == null || !presets.contains(_preset))
+          AppAutocompleteField(
+            colors: colors,
+            controller: _note,
+            options: app.pastNotes(type: _type),
+            label: 'Note / Description',
+            hint: 'e.g. Monthly salary from XYZ',
+          ),
         const SizedBox(height: 14),
         _dateField(colors),
 

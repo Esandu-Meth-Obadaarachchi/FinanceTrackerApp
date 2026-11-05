@@ -5,9 +5,11 @@ import 'package:flutter/foundation.dart';
 import '../models/account.dart';
 import '../models/app_transaction.dart';
 import '../models/budget_plan.dart';
+import '../models/chat_session.dart';
 import '../models/income_math.dart';
 import '../models/loan.dart';
 import '../models/loan_math.dart';
+import '../models/note_presets.dart';
 import '../models/recurring_rule.dart';
 import '../models/reminder.dart';
 import '../services/firestore_service.dart';
@@ -29,6 +31,9 @@ class AppState extends ChangeNotifier {
   List<RecurringRule> recurringRules = [];
   BudgetPlan? _budget; // the single saved plan for this user
   List<Reminder> reminders = [];
+  List<ChatSession> chats = []; // most recently updated first
+  bool chatsReady = false;
+  NotePresets notePresets = const NotePresets();
 
   bool _accountsReady = false;
   bool _transactionsReady = false;
@@ -41,6 +46,8 @@ class AppState extends ChangeNotifier {
   StreamSubscription? _recurringSub;
   StreamSubscription? _budgetSub;
   StreamSubscription? _reminderSub;
+  StreamSubscription? _chatSub;
+  StreamSubscription? _notesSub;
 
   /// True once all collections have produced their first snapshot.
   bool get isLoading =>
@@ -84,6 +91,16 @@ class AppState extends ChangeNotifier {
       notifyListeners();
       // Keep on-device notifications in sync with the source of truth.
       ReminderScheduler.syncAll(reminders);
+    });
+    // Assistant history, like budgets, sits outside the load gate.
+    _chatSub = _service.chatsStream().listen((data) {
+      chats = data;
+      chatsReady = true;
+      notifyListeners();
+    });
+    _notesSub = _service.notePresetsStream().listen((data) {
+      notePresets = data;
+      notifyListeners();
     });
   }
 
@@ -297,6 +314,23 @@ class AppState extends ChangeNotifier {
   /// empty, which also clears scheduled reminder notifications via syncAll.
   Future<void> resetAllData() => _service.resetAllData();
 
+  // ── Quick notes ────────────────────────────────────────────────────────
+  Future<void> addNotePreset(String type, String name) =>
+      _service.setNotePresets(notePresets.add(type, name));
+
+  Future<void> removeNotePreset(String type, String name) =>
+      _service.setNotePresets(notePresets.remove(type, name));
+
+  // ── Assistant chats ────────────────────────────────────────────────────
+  String newChatId() => _service.newChatId();
+
+  /// Saves a conversation. A new one goes through [createChat], which keeps
+  /// the user within [kMaxChats] by deleting the least recently updated.
+  Future<void> saveChat(ChatSession chat, {required bool isNew}) =>
+      isNew ? _service.createChat(chat) : _service.updateChat(chat);
+
+  Future<void> deleteChat(String id) => _service.deleteChat(id);
+
   // ── Recurring materialization ──────────────────────────────────────────
   // Generates the real transactions a rule is due for, one per month from its
   // start month up to the current calendar month (backfilling any gaps).
@@ -380,6 +414,8 @@ class AppState extends ChangeNotifier {
     _recurringSub?.cancel();
     _budgetSub?.cancel();
     _reminderSub?.cancel();
+    _chatSub?.cancel();
+    _notesSub?.cancel();
     super.dispose();
   }
 }

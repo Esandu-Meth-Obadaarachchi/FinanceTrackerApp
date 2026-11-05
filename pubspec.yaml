@@ -30,6 +30,9 @@ dependencies:
   # Local preferences (theme)
   shared_preferences: ^2.3.3
 
+  # Talking to the AI backend in backend/
+  http: ^1.2.2
+
   # Google sign-in
   google_sign_in: ^6.2.1
 

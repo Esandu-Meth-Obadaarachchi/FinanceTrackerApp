@@ -3,7 +3,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/account.dart';
 import '../models/app_transaction.dart';
 import '../models/budget_plan.dart';
+import '../models/chat_session.dart';
 import '../models/loan.dart';
+import '../models/note_presets.dart';
 import '../models/recurring_rule.dart';
 import '../models/reminder.dart';
 
@@ -29,6 +31,10 @@ class FirestoreService {
       _userDoc.collection('budgets');
   CollectionReference<Map<String, dynamic>> get _reminders =>
       _userDoc.collection('reminders');
+  CollectionReference<Map<String, dynamic>> get _settings =>
+      _userDoc.collection('settings');
+  CollectionReference<Map<String, dynamic>> get _chats =>
+      _userDoc.collection('chats');
 
   // ── Streams ────────────────────────────────────────────────────────────
   Stream<List<Account>> accountsStream() => _accounts
@@ -63,6 +69,18 @@ class FirestoreService {
       .snapshots()
       .map((s) =>
           s.docs.map((d) => Reminder.fromMap(d.id, d.data())).toList());
+
+  /// The user's quick notes (doc `settings/notes`); empty if never set.
+  Stream<NotePresets> notePresetsStream() => _settings
+      .doc('notes')
+      .snapshots()
+      .map((d) => NotePresets.fromMap(d.data()));
+
+  /// Saved assistant conversations, most recently updated first.
+  Stream<List<ChatSession>> chatsStream() => _chats
+      .orderBy('updatedAt', descending: true)
+      .snapshots()
+      .map((s) => s.docs.map(_chatFrom).toList());
 
   // ── Accounts ───────────────────────────────────────────────────────────
   Future<void> addAccount(Account a) =>
@@ -117,9 +135,47 @@ class FirestoreService {
 
   Future<void> deleteReminder(String id) => _reminders.doc(id).delete();
 
+  // ── Quick notes ────────────────────────────────────────────────────────
+  // One document, fully overwritten, so a removed note is actually gone.
+  Future<void> setNotePresets(NotePresets p) =>
+      _settings.doc('notes').set(p.toMap());
+
+  // ── Assistant chats ────────────────────────────────────────────────────
+  String newChatId() => _chats.doc().id;
+
+  ChatSession _chatFrom(QueryDocumentSnapshot<Map<String, dynamic>> d) {
+    // A write still in flight has no server timestamp yet and reads as null,
+    // which chatIdsToEvict and the UI both treat as "just now".
+    final data = d.data();
+    return ChatSession.fromMap(
+        d.id, data, (data['updatedAt'] as Timestamp?)?.toDate());
+  }
+
+  /// Saves a brand-new conversation, deleting the least recently updated ones
+  /// in the same batch so the user never holds more than [kMaxChats]. The read
+  /// is fresh rather than from the live stream, which may not have loaded yet.
+  Future<void> createChat(ChatSession c) async {
+    final existing = (await _chats.get()).docs.map(_chatFrom).toList();
+    final batch = _db.batch();
+    for (final id in chatIdsToEvict(existing)) {
+      batch.delete(_chats.doc(id));
+    }
+    batch.set(_chats.doc(c.id),
+        {...c.toMap(), 'updatedAt': FieldValue.serverTimestamp()});
+    await batch.commit();
+  }
+
+  /// Rewrites an existing conversation. Whole-document, so a trimmed message
+  /// list actually drops what it no longer holds.
+  Future<void> updateChat(ChatSession c) => _chats.doc(c.id).set(
+      {...c.toMap(), 'updatedAt': FieldValue.serverTimestamp()});
+
+  Future<void> deleteChat(String id) => _chats.doc(id).delete();
+
   // ── Reset ──────────────────────────────────────────────────────────────
   /// Permanently deletes every document in the user's tree — accounts,
-  /// transactions, loans, recurring rules, budgets and reminders. There is no
+  /// transactions, loans, recurring rules, budgets, reminders, quick notes
+  /// and assistant chats. There is no
   /// undo. Batched in chunks to stay within Firestore's per-batch limit.
   Future<void> resetAllData() async {
     for (final c in [
@@ -129,6 +185,8 @@ class FirestoreService {
       _recurring,
       _budgets,
       _reminders,
+      _chats,
+      _settings,
     ]) {
       await _deleteAllDocs(c);
     }

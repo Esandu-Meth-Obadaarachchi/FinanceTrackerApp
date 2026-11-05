@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../app_info.dart';
+import '../services/ai_service.dart';
 import '../services/notification_service.dart';
 import '../services/sms_service.dart';
 import '../state/app_state.dart';
@@ -12,6 +13,8 @@ import '../theme/theme_controller.dart';
 import '../utils/formatters.dart';
 import '../utils/responsive.dart';
 import '../widgets/common.dart';
+import '../widgets/form_fields.dart';
+import 'quick_notes_screen.dart';
 import 'reminders_screen.dart';
 
 /// Opens the settings screen. [ThemeController] lives above MaterialApp so it
@@ -90,6 +93,37 @@ class SettingsScreen extends StatelessWidget {
             _DailyRemindersCard(colors: colors),
           ],
           const SizedBox(height: 18),
+          _sectionLabel(colors, 'QUICK NOTES'),
+          InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => openQuickNotes(context),
+            child: AppCard(
+              colors: colors,
+              child: Row(
+                children: [
+                  Icon(Icons.bolt_outlined, size: 20, color: colors.sub),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Preset notes',
+                            style: sans(
+                                size: 14.5,
+                                weight: FontWeight.w600,
+                                color: colors.text)),
+                        const SizedBox(height: 2),
+                        Text('Pick "Tehan class" from a list instead of typing.',
+                            style: sans(size: 12, color: colors.sub)),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right, size: 20, color: colors.sub),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
           _sectionLabel(colors, 'PAYMENT REMINDERS'),
           InkWell(
             borderRadius: BorderRadius.circular(20),
@@ -126,6 +160,9 @@ class SettingsScreen extends StatelessWidget {
             _sectionLabel(colors, 'BANK SMS'),
             _SmsImportCard(colors: colors),
           ],
+          const SizedBox(height: 18),
+          _sectionLabel(colors, 'ASSISTANT'),
+          const _AiSettingsCard(),
           const SizedBox(height: 18),
           _sectionLabel(colors, 'ABOUT'),
           AppCard(
@@ -510,6 +547,155 @@ class _SmsImportCardState extends State<_SmsImportCard> {
             'those tails on each account (tap an account to edit). Messages '
             'that don\'t clearly match are ignored.',
             style: sans(size: 12, color: colors.sub),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Points the app at the AI backend in `backend/`, and switches it on.
+///
+/// Kept off by default: without a reachable backend every AI path would sit
+/// waiting on a timeout, which is worse than not offering the feature.
+class _AiSettingsCard extends StatefulWidget {
+  const _AiSettingsCard();
+
+  @override
+  State<_AiSettingsCard> createState() => _AiSettingsCardState();
+}
+
+class _AiSettingsCardState extends State<_AiSettingsCard> {
+  final _url = TextEditingController();
+  final _key = TextEditingController();
+  bool _enabled = false;
+  bool _checking = false;
+  bool? _reachable;
+
+  @override
+  void initState() {
+    super.initState();
+    _restore();
+  }
+
+  Future<void> _restore() async {
+    await AiService.instance.load();
+    if (!mounted) return;
+    setState(() {
+      _url.text = AiService.instance.baseUrl;
+      _key.text = AiService.instance.appKey;
+      _enabled = AiService.instance.enabled;
+    });
+  }
+
+  @override
+  void dispose() {
+    _url.dispose();
+    _key.dispose();
+    super.dispose();
+  }
+
+  Future<void> _test() async {
+    setState(() {
+      _checking = true;
+      _reachable = null;
+    });
+    await AiService.instance
+        .configure(baseUrl: _url.text, appKey: _key.text);
+    final ok = await AiService.instance.ping();
+    if (!mounted) return;
+    setState(() {
+      _checking = false;
+      _reachable = ok;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.watch<ThemeController>().colors;
+
+    return AppCard(
+      colors: colors,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.auto_awesome, size: 20, color: colors.sub),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('AI features',
+                        style: sans(
+                            size: 14.5,
+                            weight: FontWeight.w600,
+                            color: colors.text)),
+                    const SizedBox(height: 2),
+                    Text(
+                        'SMS categorising and the assistant. Needs the '
+                        'backend running.',
+                        style: sans(size: 12, color: colors.sub)),
+                  ],
+                ),
+              ),
+              Switch(
+                value: _enabled,
+                activeThumbColor: const Color(0xFF3DEBA8),
+                onChanged: (v) async {
+                  await AiService.instance.configure(
+                      enabled: v, baseUrl: _url.text, appKey: _key.text);
+                  if (mounted) setState(() => _enabled = v);
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          AppTextField(
+            colors: colors,
+            controller: _url,
+            label: 'Backend URL',
+            hint: AiService.defaultBaseUrl,
+          ),
+          const SizedBox(height: 12),
+          AppTextField(
+            colors: colors,
+            controller: _key,
+            label: 'Shared key (X-App-Key)',
+            hint: 'Blank for local development',
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              GestureDetector(
+                onTap: _checking ? null : _test,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF3DEBA8).withValues(alpha: 0.13),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(_checking ? 'Checking…' : 'Test connection',
+                      style: sans(
+                          size: 12.5,
+                          weight: FontWeight.w600,
+                          color: const Color(0xFF3DEBA8))),
+                ),
+              ),
+              const SizedBox(width: 10),
+              if (_reachable != null)
+                Text(
+                  _reachable! ? 'Backend reachable' : 'No answer',
+                  style: sans(
+                    size: 12,
+                    color: _reachable!
+                        ? const Color(0xFF3DEBA8)
+                        : const Color(0xFFFF5C7A),
+                  ),
+                ),
+            ],
           ),
         ],
       ),
