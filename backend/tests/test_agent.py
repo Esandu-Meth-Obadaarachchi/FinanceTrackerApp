@@ -203,3 +203,15 @@ async def test_the_system_prompt_forbids_asking_for_a_yes():
     router = ScriptedRouter(LLMResponse(text="Hello", provider="fake"))
     await run_agent(router, question="hi", snapshot=SNAPSHOT, today="2026-11-05")
     assert "Never write a question that expects" in router.systems[0]
+
+
+async def test_the_prompt_lists_the_real_categories_and_forbids_asking_for_a_date():
+    # The model used to invent categories ("Salary") because it was never told
+    # the real ones, and ask for a date that always defaults to today.
+    router = ScriptedRouter(LLMResponse(text="Hello", provider="fake"))
+    await run_agent(router, question="hi", snapshot=SNAPSHOT, today="2026-11-05")
+    system = router.systems[0]
+
+    assert "Employment Income" in system
+    assert "Food & Groceries" in system
+    assert "Never ask which date" in system

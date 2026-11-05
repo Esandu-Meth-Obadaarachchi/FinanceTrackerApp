@@ -617,6 +617,12 @@ plus a **No note** chip, so it costs no model call. Once the user has answered
 passes, so a forgetful model cannot loop. With no saved notes the note falls back
 to the category, as before.
 
+The system prompt carries the real income and expense category lists and the
+defaults for a new entry (date today, status received, closest category, ask
+nothing but amount and type). Without the lists the model invented labels such
+as "Salary", was rejected, and spent its turns, or asked for a date that always
+defaults to today.
+
 The prompt also forbids questions that expect a typed "yes": the proposal card
 already has Add and Cancel, and any choice goes through `ask_user` as buttons.
 

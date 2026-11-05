@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..providers.base import ToolResult, Turn
+from .parsing import EXPENSE_CATEGORIES, INCOME_CATEGORIES
 from ..providers.router import ProviderRouter
 from .actions import (
     ACTION_NAMES,
@@ -56,6 +57,18 @@ have been asked for together.
 use the `id` it returns. Never invent an id.
 - If several transactions match what the user described, ask which one \
 rather than picking.
+
+ADDING AN ENTRY
+Only the amount and the type (income, expense or transfer) are required. \
+Everything else has a default, so never ask for it:
+- date: today, unless they said otherwise. Never ask which date.
+- status: received, unless they said it is pending or not yet paid.
+- category: pick the closest label from the lists below. Never invent one and \
+never ask the user to pick a category. Use exactly the label as written.
+- account: ask only when they hold several and did not say (see below).
+- note: see the next section.
+Income categories: {income_categories}
+Expense categories: {expense_categories}
 
 BUTTONS, NOT TYPING
 The user should rarely have to type a reply. Never write a question that \
@@ -175,7 +188,11 @@ async def run_agent(
     """Answer, ask, or propose. `state` is the client's echo of the last turn."""
 
     turns = _rebuild_turns(history, question)
-    system = SYSTEM.format(today=today or "unknown")
+    system = SYSTEM.format(
+        today=today or "unknown",
+        income_categories="; ".join(INCOME_CATEGORIES),
+        expense_categories="; ".join(EXPENSE_CATEGORIES),
+    )
 
     # Resuming a clarification. Chat history alone would leave the model to
     # re-infer its own half-finished intent from prose, which is exactly where
